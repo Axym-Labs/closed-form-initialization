@@ -1,7 +1,7 @@
 # Theory Sketches for the Linear Spectral SSL Study
 
 This note isolates the main analytic points behind the experiments in
-[spectral_gap_study.py](./spectral_gap_study.py).
+[linear_spectral_ssl_study.py](./linear_spectral_ssl_study.py).
 
 ## 1. Pair statistics and the common-view covariance
 

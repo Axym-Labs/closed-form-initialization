@@ -9,7 +9,8 @@ from sklearn.neighbors import NearestNeighbors
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 
-import test2
+from project_paths import default_json_path
+import mnist_linear_augmentation_suites as aug_suites
 
 
 SEED = 7
@@ -94,7 +95,7 @@ def load_mnist_numpy():
 
 def make_suite_views(X, suite_name):
     rng = np.random.default_rng(SEED)
-    mats = test2.build_augmentation_suite(suite_name, h=28, w=28, rng=rng)
+    mats = aug_suites.build_augmentation_suite(suite_name, h=28, w=28, rng=rng)
     return [X @ A.T for A in mats]
 
 
@@ -816,7 +817,7 @@ def main():
         "residual": residual,
     }
 
-    output_path = Path("spectral_gap_results.json")
+    output_path = default_json_path("linear_spectral_ssl_results.json")
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     print(summarize_shallow(shallow))

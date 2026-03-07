@@ -4,12 +4,13 @@ from inspect import signature
 from pathlib import Path
 
 import numpy as np
-from scipy.linalg import eigh, null_space, solve_sylvester
+from scipy.linalg import eigh
 from sklearn.linear_model import LogisticRegression
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 
-import test2
+from project_paths import resolve_json_path
+import mnist_linear_augmentation_suites as aug_suites
 
 
 SEED = 7
@@ -20,10 +21,7 @@ FINAL_D = 32
 PROBE_MAX_ITER = 2000
 REG_EPS = 1e-4
 
-INV_WEIGHT = 1.0
-PRES_WEIGHT = 1.0
-SHARED_WEIGHT = 0.5
-IDENTITY_WEIGHT = 1.0
+LAMBDA_REG = 1.0
 
 
 def covariance(X):
@@ -32,11 +30,6 @@ def covariance(X):
 
 def cross_covariance(X, Y):
     return (X.T @ Y) / X.shape[0]
-
-
-def orthonormal_basis(columns):
-    q, _ = np.linalg.qr(columns, mode="reduced")
-    return q
 
 
 def load_mnist_numpy():
@@ -83,7 +76,7 @@ def fit_linear_probe(ztr, ytr, zte, yte):
 def sample_pair_views(X, suite_name, seed):
     rng = np.random.default_rng(seed)
     p = X.shape[1]
-    mats = [np.eye(p, dtype=np.float64)] + test2.build_augmentation_suite(
+    mats = [np.eye(p, dtype=np.float64)] + aug_suites.build_augmentation_suite(
         suite_name, h=28, w=28, rng=np.random.default_rng(seed)
     )
     idx1 = rng.integers(len(mats), size=X.shape[0])
@@ -98,24 +91,6 @@ def sample_pair_views(X, suite_name, seed):
             x1[mask1] = X[mask1] @ A.T
         if np.any(mask2):
             x2[mask2] = X[mask2] @ A.T
-    return x1, x2
-
-
-def sample_same_class_pairs(X, y, seed):
-    rng = np.random.default_rng(seed)
-    x1 = X.copy()
-    x2 = np.empty_like(X)
-    classes = np.unique(y)
-    for cls in classes:
-        cls_idx = np.flatnonzero(y == cls)
-        if cls_idx.size == 1:
-            x2[cls_idx] = X[cls_idx]
-            continue
-        choices = rng.integers(0, cls_idx.size, size=cls_idx.size)
-        same = cls_idx[choices] == cls_idx
-        if np.any(same):
-            choices[same] = (choices[same] + 1) % cls_idx.size
-        x2[cls_idx] = X[cls_idx[choices]]
     return x1, x2
 
 
@@ -146,56 +121,48 @@ def sqrt_and_inv_sqrt_psd(matrix, reg_eps):
     return sqrt, inv_sqrt
 
 
-def stable_and_residual_bases(stats, stable_rank):
+def fit_whitened_cov_layer(stats, lambda_reg):
+    if lambda_reg <= 0.0:
+        raise ValueError("lambda must be strictly positive.")
+
     sigma_bar = stats["sigma_bar"]
     delta = stats["delta"]
     sigma_sqrt, sigma_inv_sqrt = sqrt_and_inv_sqrt_psd(sigma_bar, REG_EPS)
-    whitened_delta = sigma_inv_sqrt @ delta @ sigma_inv_sqrt
-    whitened_delta = 0.5 * (whitened_delta + whitened_delta.T)
-    evals, evecs = eigh(whitened_delta)
-    stable_whitened = evecs[:, :stable_rank]
-    stable = orthonormal_basis(sigma_sqrt @ stable_whitened)
-    residual = null_space(stable.T)
-    return stable, residual, whitened_delta
+    m_matrix = sigma_inv_sqrt @ delta @ sigma_inv_sqrt
+    m_matrix = 0.5 * (m_matrix + m_matrix.T)
 
-
-def fit_residual_sylvester(stats, residual_basis, inv_weight, pres_weight, shared_weight, identity_weight):
-    sigma_r = residual_basis.T @ stats["sigma_bar"] @ residual_basis
-    shared_r = residual_basis.T @ stats["shared"] @ residual_basis
-    delta_r = residual_basis.T @ stats["delta"] @ residual_basis
-    dim_r = sigma_r.shape[0]
-
-    A = inv_weight * delta_r + identity_weight * np.eye(dim_r, dtype=np.float64)
-    B = pres_weight * (sigma_r @ sigma_r)
-    C = shared_weight * shared_r + pres_weight * (sigma_r @ sigma_r) + identity_weight * np.eye(
-        dim_r, dtype=np.float64
-    )
-    transform_r = solve_sylvester(A, B, C)
-    return transform_r
-
-
-def fit_deflated_layer(H1, H2, stable_rank, inv_weight, pres_weight, shared_weight, identity_weight):
-    stats = compute_paired_stats(H1, H2)
-    stable_basis, residual_basis, whitened_delta = stable_and_residual_bases(stats, stable_rank)
-    transform_r = fit_residual_sylvester(
-        stats,
-        residual_basis,
-        inv_weight=inv_weight,
-        pres_weight=pres_weight,
-        shared_weight=shared_weight,
-        identity_weight=identity_weight,
-    )
-    transform = stable_basis @ stable_basis.T + residual_basis @ transform_r @ residual_basis.T
+    dim_r = sigma_bar.shape[0]
+    eigvals_m, eigvecs_m = eigh(m_matrix)
+    gains = lambda_reg / (np.maximum(eigvals_m, 0.0) + lambda_reg)
+    g_matrix = (eigvecs_m * gains) @ eigvecs_m.T
+    transform = sigma_sqrt @ g_matrix @ sigma_inv_sqrt
     return {
         "transform": transform,
-        "stable_basis": stable_basis,
-        "residual_basis": residual_basis,
+        "g_matrix": g_matrix,
+        "m_matrix": m_matrix,
+        "gains": gains,
+        "distance_to_whitened_identity": float(np.linalg.norm(g_matrix - np.eye(dim_r), ord="fro")),
+        "max_m_eigenvalue": float(np.max(eigvals_m)),
+        "min_m_eigenvalue": float(np.min(eigvals_m)),
+    }
+
+
+def fit_layer(H1, H2, lambda_reg):
+    stats = compute_paired_stats(H1, H2)
+    model = fit_whitened_cov_layer(
+        stats,
+        lambda_reg=lambda_reg,
+    )
+    whitened_delta = model["m_matrix"]
+    return {
+        "transform": model["transform"],
         "stats": stats,
-        "stable_delta_trace": float(np.trace(stable_basis.T @ stats["delta"] @ stable_basis)),
-        "residual_delta_trace": float(np.trace(residual_basis.T @ stats["delta"] @ residual_basis)),
-        "transform_fro": float(np.linalg.norm(transform, ord="fro")),
-        "distance_to_identity": float(np.linalg.norm(transform - np.eye(transform.shape[0]), ord="fro")),
+        "transform_fro": float(np.linalg.norm(model["transform"], ord="fro")),
+        "distance_to_identity": float(np.linalg.norm(model["transform"] - np.eye(model["transform"].shape[0]), ord="fro")),
+        "distance_to_whitened_identity": model["distance_to_whitened_identity"],
+        "total_delta_trace": float(np.trace(stats["delta"])),
         "min_whitened_delta": float(np.min(np.linalg.eigvalsh(whitened_delta))),
+        "max_whitened_delta": model["max_m_eigenvalue"],
     }
 
 
@@ -221,37 +188,19 @@ def top_pca_projection(Xtr, d):
     return evecs[:, -d:]
 
 
-def run_experiment(
-    suite_name,
-    depth,
-    final_dim,
-    stable_rank,
-    inv_weight,
-    pres_weight,
-    shared_weight,
-    identity_weight,
-    pair_source,
-):
+def run_experiment(suite_name, depth, final_dim, lambda_reg):
     xtr, ytr, xte, yte = load_mnist_numpy()
     base_tr = xtr.copy()
     base_te = xte.copy()
-    if pair_source == "same-class":
-        view1_tr, view2_tr = sample_same_class_pairs(xtr, ytr, seed=SEED + 19)
-        view1_te, view2_te = sample_same_class_pairs(xte, yte, seed=SEED + 41)
-    else:
-        view1_tr, view2_tr = sample_pair_views(xtr, suite_name, seed=SEED + 19)
-        view1_te, view2_te = sample_pair_views(xte, suite_name, seed=SEED + 41)
+    view1_tr, view2_tr = sample_pair_views(xtr, suite_name, seed=SEED + 13)
+    view1_te, view2_te = sample_pair_views(xte, suite_name, seed=SEED + 31)
 
     layers = []
     for layer_idx in range(depth):
-        model = fit_deflated_layer(
+        model = fit_layer(
             view1_tr,
             view2_tr,
-            stable_rank=stable_rank,
-            inv_weight=inv_weight,
-            pres_weight=pres_weight,
-            shared_weight=shared_weight,
-            identity_weight=identity_weight,
+            lambda_reg=lambda_reg,
         )
         transform = model["transform"]
 
@@ -275,11 +224,12 @@ def run_experiment(
                 "layer": layer_idx + 1,
                 "transform_fro": model["transform_fro"],
                 "distance_to_identity": model["distance_to_identity"],
-                "stable_delta_trace": model["stable_delta_trace"],
-                "residual_delta_trace": model["residual_delta_trace"],
+                "distance_to_whitened_identity": model["distance_to_whitened_identity"],
+                "total_delta_trace": model["total_delta_trace"],
                 "post_delta_trace": float(np.trace(post_stats["delta"])),
                 "post_shared_trace": float(np.trace(post_stats["shared"])),
                 "base_trace": float(np.trace(covariance(base_tr))),
+                "max_whitened_delta": model["max_whitened_delta"],
             }
         )
 
@@ -300,61 +250,46 @@ def run_experiment(
 
     return {
         "suite": suite_name,
-        "pair_source": pair_source,
         "depth": depth,
         "final_dim": final_dim,
-        "stable_rank": stable_rank,
-        "inv_weight": inv_weight,
-        "pres_weight": pres_weight,
-        "shared_weight": shared_weight,
-        "identity_weight": identity_weight,
+        "lambda": lambda_reg,
         "full_probe_accuracy": acc_full,
         "final_pca_probe_accuracy": acc_pca32,
         "raw_input_pca_probe_accuracy": acc_raw_pca32,
         "layers": layers,
         "note": (
-            "Closed-form deflated full-matrix layer. Each layer keeps the current stable "
-            "subspace fixed and solves a Sylvester update only on the residual complement."
+            "Closed-form Barlow Twins layer with objective "
+            "tr(G^T M G) + lambda ||G - I||_F^2, whose exact solution is "
+            "G = lambda (M + lambda I)^(-1)."
         ),
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Greedy deflated full-width Sylvester layer on MNIST.")
+    parser = argparse.ArgumentParser(description="Closed-form Barlow Twins layer on MNIST.")
     parser.add_argument(
         "--suite",
         default="single-translation",
         choices=["image", "translation", "single-translation", "random-masking", "block-masking", "blurring", "rotation", "random-crops"],
     )
-    parser.add_argument(
-        "--pair-source",
-        default="suite",
-        choices=["suite", "same-class"],
-    )
     parser.add_argument("--depth", type=int, default=DEPTH)
     parser.add_argument("--final-d", type=int, default=FINAL_D)
-    parser.add_argument("--stable-rank", type=int, default=FINAL_D)
-    parser.add_argument("--inv-weight", type=float, default=INV_WEIGHT)
-    parser.add_argument("--pres-weight", type=float, default=PRES_WEIGHT)
-    parser.add_argument("--shared-weight", type=float, default=SHARED_WEIGHT)
-    parser.add_argument("--identity-weight", type=float, default=IDENTITY_WEIGHT)
+    parser.add_argument("--lambda", dest="lambda_reg", type=float, default=LAMBDA_REG)
     parser.add_argument("--save-json", type=Path, default=None)
     args = parser.parse_args()
+
+    if args.lambda_reg <= 0.0:
+        raise ValueError("--lambda must be strictly positive.")
 
     result = run_experiment(
         suite_name=args.suite,
         depth=args.depth,
         final_dim=args.final_d,
-        stable_rank=args.stable_rank,
-        inv_weight=args.inv_weight,
-        pres_weight=args.pres_weight,
-        shared_weight=args.shared_weight,
-        identity_weight=args.identity_weight,
-        pair_source=args.pair_source,
+        lambda_reg=args.lambda_reg,
     )
 
     print(
-        f"Greedy deflated full-width Sylvester layer  |  suite={result['suite']}  |  pair_source={result['pair_source']}  |  depth={result['depth']}  |  final_d={result['final_dim']}  |  stable_rank={result['stable_rank']}"
+        f"Closed-form Barlow Twins  |  suite={result['suite']}  |  depth={result['depth']}  |  final_d={result['final_dim']}"
     )
     print(f"full probe accuracy      : {result['full_probe_accuracy']:.4f}")
     print(f"final PCA-{result['final_dim']} probe : {result['final_pca_probe_accuracy']:.4f}")
@@ -362,14 +297,16 @@ def main():
     for layer in result["layers"]:
         print(
             f"layer {layer['layer']:>2d} | ||T-I||_F={layer['distance_to_identity']:.3f} | "
-            f"stable_delta={layer['stable_delta_trace']:.3f} | residual_delta={layer['residual_delta_trace']:.3f} | "
-            f"post_delta={layer['post_delta_trace']:.3f} | post_shared={layer['post_shared_trace']:.3f}"
+            f"||G-I||_F={layer['distance_to_whitened_identity']:.3f} | "
+            f"post_delta={layer['post_delta_trace']:.3f} | post_shared={layer['post_shared_trace']:.3f} | "
+            f"max_M={layer['max_whitened_delta']:.3f}"
         )
     print(result["note"])
 
     if args.save_json is not None:
-        args.save_json.write_text(json.dumps(result, indent=2), encoding="utf-8")
-        print(f"saved json to {args.save_json}")
+        output_path = resolve_json_path(args.save_json)
+        output_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        print(f"saved json to {output_path}")
 
 
 if __name__ == "__main__":

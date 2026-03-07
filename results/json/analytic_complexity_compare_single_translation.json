@@ -5,53 +5,53 @@
   "d": 32,
   "lambda": 1.0,
   "timings_seconds": {
-    "pair_family_build": 0.25210239994339645,
-    "pair_sampling_build": 0.5910366999451071,
-    "pca_moments": 0.12572390004061162,
-    "pair_moments": 0.9607867000158876,
-    "dnn_pair_moments": 0.9294487000443041,
-    "pca_solver": 0.06056979997083545,
-    "whitened_pca_solver": 0.06355249998159707,
-    "hard_whitened_solver": 0.18491839990019798,
-    "auto_fisher_solver": 0.09275810001417994,
-    "one_parameter_dnn_solver": 0.2531009002123028
+    "pair_family_build": 0.21946720010600984,
+    "pair_sampling_build": 0.5264870000537485,
+    "pca_moments": 0.1112166999373585,
+    "pair_moments": 0.8537775999866426,
+    "dnn_pair_moments": 0.89109419984743,
+    "pca_solver": 0.058450100012123585,
+    "whitened_pca_solver": 0.06409320002421737,
+    "hard_whitened_solver": 0.1641249000094831,
+    "auto_fisher_solver": 0.07990860007703304,
+    "one_parameter_dnn_solver": 0.22199820005334914
   },
   "breakdown_seconds": {
     "pca": {
-      "covariance": 0.12645699991844594,
-      "eigendecomposition": 0.06375730014406145,
-      "projection_extract": 6.00004568696022e-07,
-      "total_measured": 0.1902149000670761
+      "covariance": 0.11047910014167428,
+      "eigendecomposition": 0.056522800121456385,
+      "projection_extract": 6.998889148235321e-07,
+      "total_measured": 0.1670026001520455
     },
     "whitened_pca": {
-      "covariance": 0.1264212999958545,
-      "eigendecomposition": 0.06191729987040162,
-      "whitening_rescale": 1.9899802282452583e-05,
-      "total_measured": 0.18835849966853857
+      "covariance": 0.1106294000055641,
+      "eigendecomposition": 0.053947600070387125,
+      "whitening_rescale": 2.0799925550818443e-05,
+      "total_measured": 0.16459780000150204
     },
     "hard_whitened_invariance": {
-      "pair_statistics": 0.9628621998708695,
-      "sigma_bar_eigendecomposition": 0.060920200077816844,
-      "sigma_bar_inverse_sqrt": 0.01773739978671074,
-      "form_n_matrix": 0.034290599869564176,
-      "n_eigendecomposition": 0.06862440006807446,
-      "total_measured": 1.1444347996730357
+      "pair_statistics": 0.8778063000645489,
+      "sigma_bar_eigendecomposition": 0.05579069978557527,
+      "sigma_bar_inverse_sqrt": 0.01621629996225238,
+      "form_n_matrix": 0.031233999878168106,
+      "n_eigendecomposition": 0.06132499990053475,
+      "total_measured": 1.0423722995910794
     },
     "auto_fisher": {
-      "pair_statistics": 0.9605421999003738,
-      "denominator_build": 0.0030414999928325415,
-      "generalized_eigendecomposition": 0.08693149988539517,
-      "total_measured": 1.0505151997786015,
+      "pair_statistics": 0.8983786997850984,
+      "denominator_build": 0.0029559999238699675,
+      "generalized_eigendecomposition": 0.07687769993208349,
+      "total_measured": 0.9782123996410519,
       "floor": 0.1426322997680967
     },
     "one_parameter_whitened_dnn_layer": {
-      "pair_statistics": 0.9304688000120223,
-      "sigma_bar_eigendecomposition": 0.06257670000195503,
-      "sigma_bar_sqrt_and_inverse_sqrt": 0.0347890998236835,
-      "form_m_matrix": 0.034224299946799874,
-      "m_eigendecomposition": 0.06427249987609684,
-      "reconstruct_transform": 0.05113889998756349,
-      "total_measured": 1.177470299648121
+      "pair_statistics": 0.8555980001110584,
+      "sigma_bar_eigendecomposition": 0.05657789995893836,
+      "sigma_bar_sqrt_and_inverse_sqrt": 0.03181689977645874,
+      "form_m_matrix": 0.031104600057005882,
+      "m_eigendecomposition": 0.056900700088590384,
+      "reconstruct_transform": 0.04592419997788966,
+      "total_measured": 1.0779222999699414
     }
   },
   "methods": {
@@ -92,9 +92,9 @@
       "floor": 0.1426322997680967,
       "complexity_note": "pair statistics plus one dense generalized symmetric eigendecomposition"
     },
-    "one_parameter_whitened_dnn_layer": {
+    "closed_form_barlow_twins": {
       "solver": "whitening eigendecomposition and full-space spectral filter",
-      "objective_type": "one-parameter whitened quadratic surrogate tr(G^T M G) + lambda ||G-I||_F^2",
+      "objective_type": "closed-form Barlow Twins surrogate tr(G^T M G) + lambda ||G-I||_F^2",
       "convergence": "unique global minimizer for any lambda > 0; no iterative optimization, only dense linear algebra",
       "condition_number": 4.076952439894843,
       "gain_min": 0.24528125229388564,
@@ -108,7 +108,7 @@
   },
   "notes": [
     "Timing separates moment construction from the analytic solve itself.",
-    "The one-parameter DNN layer is compared at a single layer; a depth-L network scales roughly linearly in L.",
+    "The closed-form Barlow Twins layer is compared at a single layer; a depth-L network scales roughly linearly in L.",
     "All methods are exact dense linear-algebra solvers; there is no iterative training loop in this benchmark.",
     "The asymptotic order of the one-parameter layer now matches PCA and auto-Fisher up to constants; the remaining gap is a large dense-linear-algebra constant factor."
   ]

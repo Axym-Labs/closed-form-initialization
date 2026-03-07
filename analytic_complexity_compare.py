@@ -6,8 +6,9 @@ from pathlib import Path
 import numpy as np
 from scipy.linalg import eigh
 
-import greedy_fullwidth_whitened_cov as gwc
-import spectral_gap_study as sgs
+import closed_form_barlow_twins as gwc
+from project_paths import resolve_json_path
+import linear_spectral_ssl_study as sgs
 
 
 REPEATS = 5
@@ -140,7 +141,7 @@ def analyze_one_parameter_layer(stats, lambda_reg):
     gains = lambda_reg / (np.maximum(eigvals_m, 0.0) + lambda_reg)
     return {
         "solver": "whitening eigendecomposition and full-space spectral filter",
-        "objective_type": "one-parameter whitened quadratic surrogate tr(G^T M G) + lambda ||G-I||_F^2",
+        "objective_type": "closed-form Barlow Twins surrogate tr(G^T M G) + lambda ||G-I||_F^2",
         "convergence": "unique global minimizer for any lambda > 0; no iterative optimization, only dense linear algebra",
         "condition_number": condition_number(lhs),
         "gain_min": float(np.min(gains)),
@@ -338,11 +339,11 @@ def main():
             "whitened_pca": analyze_whitened_pca(stats_pca, args.d),
             "hard_whitened_invariance": analyze_hard_whitened(stats_pair, args.d),
             "auto_fisher": analyze_auto_fisher(stats_pair, args.d),
-            "one_parameter_whitened_dnn_layer": analyze_one_parameter_layer(stats_dnn, lambda_reg=args.lambda_reg),
+            "closed_form_barlow_twins": analyze_one_parameter_layer(stats_dnn, lambda_reg=args.lambda_reg),
         },
         "notes": [
             "Timing separates moment construction from the analytic solve itself.",
-            "The one-parameter DNN layer is compared at a single layer; a depth-L network scales roughly linearly in L.",
+            "The closed-form Barlow Twins layer is compared at a single layer; a depth-L network scales roughly linearly in L.",
             "All methods are exact dense linear-algebra solvers; there is no iterative training loop in this benchmark.",
             "The asymptotic order of the one-parameter layer now matches PCA and auto-Fisher up to constants; the remaining gap is a large dense-linear-algebra constant factor.",
         ],
@@ -350,7 +351,8 @@ def main():
 
     print(json.dumps(result, indent=2))
     if args.save_json is not None:
-        args.save_json.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        output_path = resolve_json_path(args.save_json)
+        output_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

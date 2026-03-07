@@ -8,7 +8,7 @@ This note studies the current linearized VICReg-style spectral objective in this
 2. What theoretically motivated changes can close that gap while staying within a linear, analytic, non-gradient framework?
 3. Can the same ideas be used to optimize linear layers in a greedy MLP-style network, one layer at a time, without gradient descent?
 
-The accompanying code for the new study is in [spectral_gap_study.py](./spectral_gap_study.py), the raw outputs are in [spectral_gap_results.json](./spectral_gap_results.json), and the cleanest derivation sketches are in [theory_sketches.md](./theory_sketches.md).
+The accompanying code for the new study is in [linear_spectral_ssl_study.py](./linear_spectral_ssl_study.py), the raw outputs are in [results/json/linear_spectral_ssl_results.json](./results/json/linear_spectral_ssl_results.json), and the cleanest derivation sketches are in [theory_sketches.md](./theory_sketches.md).
 
 ## Executive Summary
 
@@ -625,9 +625,9 @@ If the goal is to stay close to the current motivation and keep everything linea
    - augmentation acts only on nuisance,
    - nuisance variance dominates total covariance
 
-## 12. One-Parameter Whitened-Covariance Layer
+## 12. Closed-Form Barlow Twins Layer
 
-The newest analytic DNN layer in [greedy_fullwidth_whitened_cov.py](./greedy_fullwidth_whitened_cov.py) simplifies the earlier Sylvester model to a one-parameter objective.
+The newest analytic DNN layer in [closed_form_barlow_twins.py](./closed_form_barlow_twins.py) simplifies the earlier Sylvester model to a one-parameter objective.
 
 Let
 
@@ -702,9 +702,9 @@ Let `n` be the sample count, `p` the ambient width, and `d` the bottleneck used 
 | whitened PCA | PCA plus eigenvalue rescaling | `O(n p^2 + p^3)` |
 | hard-whitened invariance | whiten `Sigma_bar`, then bottom eigenspace of `Sigma_bar^{-1/2} Delta Sigma_bar^{-1/2}` | `O(K n p^2 + 2 p^3)` |
 | auto-Fisher | generalized eigenspace of `(Sigma, Delta + tau I)` | `O(K n p^2 + p^3)` |
-| one-parameter whitened DNN layer | whiten `Sigma_bar`, form `M = Sigma_bar^{-1/2} Delta Sigma_bar^{-1/2}`, then apply `G* = lambda (M + lambda I)^(-1)` | `O(n p^2 + p^3)` per layer |
+| closed-form Barlow Twins layer | whiten `Sigma_bar`, form `M = Sigma_bar^{-1/2} Delta Sigma_bar^{-1/2}`, then apply `G* = lambda (M + lambda I)^(-1)` | `O(n p^2 + p^3)` per layer |
 
-The important update is that, after removing the old stable-split / bottom-`N` stage, the one-parameter DNN layer is now in the **same asymptotic complexity class** as PCA and auto-Fisher:
+The important update is that, after removing the old stable-split / bottom-`N` stage, the closed-form Barlow Twins layer is now in the **same asymptotic complexity class** as PCA and auto-Fisher:
 
 - all three are `O(n p^2 + p^3)` dense solvers,
 - but the one-parameter layer has a much larger cubic constant because it uses multiple dense matrix products and two eigendecompositions rather than one.
@@ -719,7 +719,7 @@ Using [analytic_complexity_compare.py](./analytic_complexity_compare.py) on `MNI
 | whitened PCA | `0.126` | `0.064` | same eigengap as PCA |
 | hard-whitened invariance | `0.963` | `0.185` | bottom-gap `4.61e-17`, nearly degenerate |
 | auto-Fisher | `0.961` | `0.093` | denominator cond. `84.6` |
-| one-parameter DNN layer | `0.930` | `0.253` | solve cond. `4.08` for `M + lambda I` |
+| closed-form Barlow Twins layer | `0.930` | `0.253` | solve cond. `4.08` for `M + lambda I` |
 
 These timings were rerun with single-threaded BLAS to reduce noise. They are still implementation-specific, but they now match the asymptotic story much more closely.
 
@@ -747,7 +747,7 @@ The main convergence story is now quite clean:
 3. **Auto-Fisher**  
    This is a one-shot generalized eigenproblem. Once the denominator is regularized, it remains globally solvable and typically much better conditioned than the hard-whitened method.
 
-4. **One-parameter whitened DNN layer**  
+4. **Closed-form Barlow Twins layer**  
    This is not an iterative optimizer at all. For `lambda > 0`, the objective is strictly convex and the solution is unique:
    `G* = lambda (M + lambda I)^(-1)`.
    So there is no training convergence issue in the usual sense; only the conditioning of `M + lambda I` matters. With `lambda = 1`, that conditioning was very benign in the current benchmark.

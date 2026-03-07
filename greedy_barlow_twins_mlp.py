@@ -11,7 +11,8 @@ from torch.utils.data import DataLoader, TensorDataset
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 
-import test2
+from project_paths import resolve_json_path
+import mnist_linear_augmentation_suites as aug_suites
 
 
 SEED = 7
@@ -58,7 +59,7 @@ def load_mnist_numpy():
 def sample_pair_views(X, suite_name, seed):
     rng = np.random.default_rng(seed)
     p = X.shape[1]
-    mats = [np.eye(p, dtype=np.float32)] + test2.build_augmentation_suite(
+    mats = [np.eye(p, dtype=np.float32)] + aug_suites.build_augmentation_suite(
         suite_name, h=28, w=28, rng=np.random.default_rng(seed)
     )
     idx1 = rng.integers(len(mats), size=X.shape[0])
@@ -302,8 +303,9 @@ def main():
             print(f"  layer {layer['layer']} final loss = {layer['final_epoch_loss']:.4f}")
 
     if args.save_json is not None:
-        args.save_json.write_text(json.dumps(results, indent=2), encoding="utf-8")
-        print(f"saved json to {args.save_json}")
+        output_path = resolve_json_path(args.save_json)
+        output_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+        print(f"saved json to {output_path}")
 
 
 if __name__ == "__main__":

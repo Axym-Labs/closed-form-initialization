@@ -3,11 +3,12 @@ from pathlib import Path
 
 import numpy as np
 
-import spectral_gap_study as sgs
+from project_paths import default_json_path
+import linear_spectral_ssl_study as sgs
 
 
 PAIR_NAME = "same-class-random-pair"
-OUTPUT_PATH = Path("same_class_pair_results.json")
+OUTPUT_PATH = default_json_path("same_class_pair_results.json")
 
 
 def build_same_class_view(X, y, seed):

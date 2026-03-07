@@ -1,4 +1,4 @@
-# simplified_vicreg_mnist_aug_suites.py
+# mnist_linear_augmentation_suites.py
 #
 # Hard-whitened linear VICReg experiment on MNIST with:
 # - d = 32

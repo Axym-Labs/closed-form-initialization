@@ -41,5 +41,5 @@
       "max_whitened_delta": 2.535811059543921
     }
   ],
-  "note": "Full-width one-parameter whitened layer with objective tr(G^T M G) + lambda ||G - I||_F^2, whose exact solution is G = lambda (M + lambda I)^(-1)."
+  "note": "Closed-form Barlow Twins layer with objective tr(G^T M G) + lambda ||G - I||_F^2, whose exact solution is G = lambda (M + lambda I)^(-1)."
 }
