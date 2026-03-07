@@ -1,0 +1,38 @@
+[
+  {
+    "dataset": "cifar10",
+    "suite": "single-translation",
+    "depth": 3,
+    "final_dim": 32,
+    "residual_rank": 256,
+    "full_probe_accuracy": 0.214,
+    "final_pca_probe_accuracy": 0.312,
+    "layers": [
+      {
+        "layer": 1,
+        "residual_rank": 256,
+        "distance_to_identity_r": 0.08577611381022836,
+        "top_generalized_delta": 3.3827166979063175,
+        "post_delta_trace": 1613.6968232085183,
+        "post_shared_trace": 2168.8903518448114
+      },
+      {
+        "layer": 2,
+        "residual_rank": 256,
+        "distance_to_identity_r": 0.42636441478682746,
+        "top_generalized_delta": 3.747780128897231,
+        "post_delta_trace": 1609.739686996131,
+        "post_shared_trace": 2164.024046308934
+      },
+      {
+        "layer": 3,
+        "residual_rank": 256,
+        "distance_to_identity_r": 0.5387567482188776,
+        "top_generalized_delta": 3.7575768501550493,
+        "post_delta_trace": 1612.167724492204,
+        "post_shared_trace": 2158.0713150736105
+      }
+    ],
+    "note": "Scalable CIFAR version of the deflated full-width Sylvester DNN. Each layer updates only a rank-r residual subspace of the current full representation."
+  }
+]

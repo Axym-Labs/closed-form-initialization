@@ -1,0 +1,115 @@
+{
+  "suite": "single-translation",
+  "n": 12000,
+  "p": 784,
+  "d": 32,
+  "lambda": 1.0,
+  "timings_seconds": {
+    "pair_family_build": 0.25210239994339645,
+    "pair_sampling_build": 0.5910366999451071,
+    "pca_moments": 0.12572390004061162,
+    "pair_moments": 0.9607867000158876,
+    "dnn_pair_moments": 0.9294487000443041,
+    "pca_solver": 0.06056979997083545,
+    "whitened_pca_solver": 0.06355249998159707,
+    "hard_whitened_solver": 0.18491839990019798,
+    "auto_fisher_solver": 0.09275810001417994,
+    "one_parameter_dnn_solver": 0.2531009002123028
+  },
+  "breakdown_seconds": {
+    "pca": {
+      "covariance": 0.12645699991844594,
+      "eigendecomposition": 0.06375730014406145,
+      "projection_extract": 6.00004568696022e-07,
+      "total_measured": 0.1902149000670761
+    },
+    "whitened_pca": {
+      "covariance": 0.1264212999958545,
+      "eigendecomposition": 0.06191729987040162,
+      "whitening_rescale": 1.9899802282452583e-05,
+      "total_measured": 0.18835849966853857
+    },
+    "hard_whitened_invariance": {
+      "pair_statistics": 0.9628621998708695,
+      "sigma_bar_eigendecomposition": 0.060920200077816844,
+      "sigma_bar_inverse_sqrt": 0.01773739978671074,
+      "form_n_matrix": 0.034290599869564176,
+      "n_eigendecomposition": 0.06862440006807446,
+      "total_measured": 1.1444347996730357
+    },
+    "auto_fisher": {
+      "pair_statistics": 0.9605421999003738,
+      "denominator_build": 0.0030414999928325415,
+      "generalized_eigendecomposition": 0.08693149988539517,
+      "total_measured": 1.0505151997786015,
+      "floor": 0.1426322997680967
+    },
+    "one_parameter_whitened_dnn_layer": {
+      "pair_statistics": 0.9304688000120223,
+      "sigma_bar_eigendecomposition": 0.06257670000195503,
+      "sigma_bar_sqrt_and_inverse_sqrt": 0.0347890998236835,
+      "form_m_matrix": 0.034224299946799874,
+      "m_eigendecomposition": 0.06427249987609684,
+      "reconstruct_transform": 0.05113889998756349,
+      "total_measured": 1.177470299648121
+    }
+  },
+  "methods": {
+    "pca": {
+      "solver": "symmetric eigendecomposition",
+      "objective_type": "top-eigenspace of covariance",
+      "convergence": "global optimum; numerical stability governed by the top-d eigengap",
+      "eigengap": 0.02871479773211133,
+      "condition_number": 51057.53415365671,
+      "time_complexity": "O(n p^2 + p^3)",
+      "complexity_note": "one covariance build and one dense symmetric eigendecomposition"
+    },
+    "whitened_pca": {
+      "solver": "symmetric eigendecomposition plus eigenvalue rescaling",
+      "objective_type": "top-eigenspace of covariance with whitening on the selected modes",
+      "convergence": "same eigenproblem as PCA; whitening adds conditioning sensitivity on small selected eigenvalues",
+      "eigengap": 0.02871479773211133,
+      "condition_number": 51057.53415365671,
+      "time_complexity": "O(n p^2 + p^3)",
+      "complexity_note": "same eigensolve as PCA plus diagonal rescaling on the selected modes"
+    },
+    "hard_whitened_invariance": {
+      "solver": "whitening eigendecomposition plus bottom-eigenspace of the normalized disagreement matrix",
+      "objective_type": "hard-whitened invariance",
+      "convergence": "global optimum of the spectral surrogate, but sensitive to sigma_bar conditioning and degenerate when delta approaches zero",
+      "eigengap": 4.606918009347546e-17,
+      "condition_number": 34689.851180021404,
+      "time_complexity": "O(K n p^2 + p^3)",
+      "complexity_note": "pair statistics plus one whitening eigendecomposition and one eigensolve of the normalized disagreement matrix"
+    },
+    "auto_fisher": {
+      "solver": "generalized symmetric eigendecomposition",
+      "objective_type": "total-vs-within-orbit generalized Rayleigh quotient",
+      "convergence": "global optimum once the denominator is regularized; numerical sensitivity set by the generalized eigengap and denominator conditioning",
+      "eigengap": 0.03753406722810548,
+      "condition_number": 84.57652332772703,
+      "time_complexity": "O(K n p^2 + p^3)",
+      "floor": 0.1426322997680967,
+      "complexity_note": "pair statistics plus one dense generalized symmetric eigendecomposition"
+    },
+    "one_parameter_whitened_dnn_layer": {
+      "solver": "whitening eigendecomposition and full-space spectral filter",
+      "objective_type": "one-parameter whitened quadratic surrogate tr(G^T M G) + lambda ||G-I||_F^2",
+      "convergence": "unique global minimizer for any lambda > 0; no iterative optimization, only dense linear algebra",
+      "condition_number": 4.076952439894843,
+      "gain_min": 0.24528125229388564,
+      "gain_max": 1.0,
+      "time_complexity": "O(n p^2 + p^3)",
+      "complexity_note": "same asymptotic order as PCA, but with two eigendecompositions and several dense matrix multiplications, so the cubic constant is much larger",
+      "whitened_delta_min": -1.8919142588003552e-14,
+      "whitened_delta_max": 3.076952439894763,
+      "lambda": 1.0
+    }
+  },
+  "notes": [
+    "Timing separates moment construction from the analytic solve itself.",
+    "The one-parameter DNN layer is compared at a single layer; a depth-L network scales roughly linearly in L.",
+    "All methods are exact dense linear-algebra solvers; there is no iterative training loop in this benchmark.",
+    "The asymptotic order of the one-parameter layer now matches PCA and auto-Fisher up to constants; the remaining gap is a large dense-linear-algebra constant factor."
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "suite": "block-masking",
+  "depth": 3,
+  "final_dim": 32,
+  "lambda": 1.0,
+  "full_probe_accuracy": 0.9523333333333334,
+  "final_pca_probe_accuracy": 0.9043333333333333,
+  "raw_input_pca_probe_accuracy": 0.906,
+  "layers": [
+    {
+      "layer": 1,
+      "transform_fro": 26.80150811879379,
+      "distance_to_identity": 13.108826054223996,
+      "distance_to_whitened_identity": 5.769984540836114,
+      "total_delta_trace": 9.478245080465364,
+      "post_delta_trace": 156.40469035473598,
+      "post_shared_trace": 579.8277891714065,
+      "base_trace": 726.6548157682216,
+      "max_whitened_delta": 1.731294688629991
+    },
+    {
+      "layer": 2,
+      "transform_fro": 22.984562990320597,
+      "distance_to_identity": 11.825968419459153,
+      "distance_to_whitened_identity": 8.45177127105978,
+      "total_delta_trace": 156.40469035473598,
+      "post_delta_trace": 146.94098947624792,
+      "post_shared_trace": 578.9070948688293,
+      "base_trace": 737.8097445896178,
+      "max_whitened_delta": 2.0050730276872053
+    },
+    {
+      "layer": 3,
+      "transform_fro": 22.491645124918733,
+      "distance_to_identity": 11.844802914427945,
+      "distance_to_whitened_identity": 8.766187584086085,
+      "total_delta_trace": 146.94098947624792,
+      "post_delta_trace": 149.47088403159336,
+      "post_shared_trace": 630.264899281143,
+      "base_trace": 808.5659015577804,
+      "max_whitened_delta": 1.8500861116429883
+    }
+  ],
+  "note": "Full-width one-parameter whitened layer with objective tr(G^T M G) + lambda ||G - I||_F^2, whose exact solution is G = lambda (M + lambda I)^(-1)."
+}

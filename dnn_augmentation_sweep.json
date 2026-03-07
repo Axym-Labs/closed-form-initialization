@@ -1,0 +1,114 @@
+[
+  {
+    "suite": "block-masking",
+    "depth": 3,
+    "full_probe_accuracy": 0.9203333333333333,
+    "final_pca_probe_accuracy": 0.877,
+    "raw_input_pca_probe_accuracy": 0.906,
+    "layer_distances_to_identity": [
+      0.7985752328703942,
+      2.614693133900993,
+      2.628395947456444
+    ],
+    "final_post_delta_trace": 156.22905782601998,
+    "final_post_shared_trace": 636.2924398537828
+  },
+  {
+    "suite": "single-translation",
+    "depth": 3,
+    "full_probe_accuracy": 0.9176666666666666,
+    "final_pca_probe_accuracy": 0.864,
+    "raw_input_pca_probe_accuracy": 0.906,
+    "layer_distances_to_identity": [
+      2.1687356098085884,
+      5.39352558222541,
+      5.14151754053055
+    ],
+    "final_post_delta_trace": 515.512529479895,
+    "final_post_shared_trace": 530.8280548826609
+  },
+  {
+    "suite": "blurring",
+    "depth": 3,
+    "full_probe_accuracy": 0.912,
+    "final_pca_probe_accuracy": 0.8876666666666667,
+    "raw_input_pca_probe_accuracy": 0.906,
+    "layer_distances_to_identity": [
+      1.0685073359569202,
+      3.381539541451593,
+      3.5399178111659553
+    ],
+    "final_post_delta_trace": 7.527598582812653,
+    "final_post_shared_trace": 753.7635595138684
+  },
+  {
+    "suite": "random-masking",
+    "depth": 3,
+    "full_probe_accuracy": 0.91,
+    "final_pca_probe_accuracy": 0.8726666666666667,
+    "raw_input_pca_probe_accuracy": 0.906,
+    "layer_distances_to_identity": [
+      1.0975249632803419,
+      5.589008462422843,
+      4.796394580472454
+    ],
+    "final_post_delta_trace": 239.93283399711163,
+    "final_post_shared_trace": 524.7398537218645
+  },
+  {
+    "suite": "random-crops",
+    "depth": 3,
+    "full_probe_accuracy": 0.9046666666666666,
+    "final_pca_probe_accuracy": 0.8826666666666667,
+    "raw_input_pca_probe_accuracy": 0.906,
+    "layer_distances_to_identity": [
+      1.8914102181105503,
+      6.129700163567369,
+      5.809505549711873
+    ],
+    "final_post_delta_trace": 846.6471918243715,
+    "final_post_shared_trace": 511.0004691206278
+  },
+  {
+    "suite": "rotation",
+    "depth": 3,
+    "full_probe_accuracy": 0.8973333333333333,
+    "final_pca_probe_accuracy": 0.8696666666666667,
+    "raw_input_pca_probe_accuracy": 0.906,
+    "layer_distances_to_identity": [
+      1.622436301524391,
+      6.398584645460707,
+      5.699435618587785
+    ],
+    "final_post_delta_trace": 443.35439722460814,
+    "final_post_shared_trace": 553.3874585055141
+  },
+  {
+    "suite": "image",
+    "depth": 3,
+    "full_probe_accuracy": 0.8956666666666667,
+    "final_pca_probe_accuracy": 0.8616666666666667,
+    "raw_input_pca_probe_accuracy": 0.906,
+    "layer_distances_to_identity": [
+      1.5770848589407918,
+      6.89195931904282,
+      6.479291853342479
+    ],
+    "final_post_delta_trace": 754.273625799954,
+    "final_post_shared_trace": 478.9347159976602
+  },
+  {
+    "suite": "translation",
+    "depth": 3,
+    "full_probe_accuracy": 0.8883333333333333,
+    "final_pca_probe_accuracy": 0.8616666666666667,
+    "raw_input_pca_probe_accuracy": 0.906,
+    "layer_distances_to_identity": [
+      2.342731976788481,
+      8.116437599881934,
+      7.554940579164596
+    ],
+    "final_post_delta_trace": 849.0468606330655,
+    "final_post_shared_trace": 446.51764400592515
+  }
+]

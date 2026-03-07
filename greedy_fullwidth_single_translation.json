@@ -1,0 +1,44 @@
+{
+  "suite": "single-translation",
+  "depth": 3,
+  "final_dim": 32,
+  "inv_weight": 1.0,
+  "orth_weight": 1.0,
+  "identity_weight": 1.0,
+  "full_probe_accuracy": 0.864,
+  "final_pca_probe_accuracy": 0.839,
+  "raw_input_pca_probe_accuracy": 0.906,
+  "layers": [
+    {
+      "layer": 1,
+      "mean_scale": 0.8237482856472496,
+      "min_scale": 0.41342839884113586,
+      "max_scale": 1.0,
+      "orth_penalty": 120.89180900938557,
+      "delta_trace": 560.5237516282175,
+      "shared_trace": 405.4962980963887,
+      "base_trace": 712.8530351332494
+    },
+    {
+      "layer": 2,
+      "mean_scale": 0.8170240981485628,
+      "min_scale": 0.31598268004559193,
+      "max_scale": 1.0,
+      "orth_penalty": 126.4396371516532,
+      "delta_trace": 414.1556426718416,
+      "shared_trace": 479.05242882877576,
+      "base_trace": 731.1338945082247
+    },
+    {
+      "layer": 3,
+      "mean_scale": 0.827599310117051,
+      "min_scale": 0.3173369930919879,
+      "max_scale": 1.0,
+      "orth_penalty": 115.3155116733307,
+      "delta_trace": 294.92441319519105,
+      "shared_trace": 524.2370416784474,
+      "base_trace": 760.797073191897
+    }
+  ],
+  "note": "Closed-form full-width pairwise layer: whiten current paired covariance, diagonalize the whitened disagreement matrix, solve one cubic per mode, apply a square operator, and compress only at the end."
+}

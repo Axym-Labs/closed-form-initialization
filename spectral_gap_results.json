@@ -1,0 +1,3099 @@
+{
+  "config": {
+    "seed": 7,
+    "n_train": 12000,
+    "n_test": 3000,
+    "shallow_d": 32,
+    "layer_dims": [
+      256,
+      64,
+      32
+    ],
+    "methods": [
+      "pca",
+      "pca_surplus",
+      "logdet_surplus",
+      "hard_whitened_invariance",
+      "shared_covariance",
+      "auto_fisher"
+    ],
+    "shallow_suites": [
+      "single-translation",
+      "blurring",
+      "random-masking",
+      "block-masking"
+    ],
+    "layerwise_settings": [
+      {
+        "name": "single-translation",
+        "pair_mode": "suite"
+      },
+      {
+        "name": "blurring",
+        "pair_mode": "suite"
+      },
+      {
+        "name": "1nn-graph-refresh",
+        "pair_mode": "graph_refresh"
+      },
+      {
+        "name": "5nn-mean-graph-refresh",
+        "pair_mode": "graph_mean_refresh"
+      },
+      {
+        "name": "mutual-10nn-graph-refresh",
+        "pair_mode": "graph_mutual_refresh"
+      },
+      {
+        "name": "affinity-10nn-mean-graph-refresh",
+        "pair_mode": "graph_affinity_mean_refresh"
+      },
+      {
+        "name": "sign-64-sketch-refresh",
+        "pair_mode": "sketch_refresh"
+      },
+      {
+        "name": "sparse-64-sketch-refresh",
+        "pair_mode": "sparse_sketch_refresh"
+      }
+    ],
+    "graph_pair_name": "1nn-graph",
+    "graph_mean_pair_name": "5nn-mean-graph",
+    "graph_mean_k": 5,
+    "graph_mutual_pair_name": "mutual-10nn-graph",
+    "graph_affinity_mean_pair_name": "affinity-10nn-mean-graph",
+    "graph_affinity_k": 10,
+    "residual_settings": [
+      {
+        "name": "sign-64-sketch-residual",
+        "pair_name": "sign-64-sketch"
+      },
+      {
+        "name": "sparse-64-sketch-residual",
+        "pair_name": "sparse-64-sketch"
+      }
+    ],
+    "residual_branch_rank": 128,
+    "residual_depth": 3
+  },
+  "shallow": [
+    {
+      "suite": "single-translation",
+      "method": "pca",
+      "d": 32,
+      "delta_trace_ratio": 2.129734755460799,
+      "commutator_ratio": 0.1829577142682344,
+      "probe_accuracy": 0.906,
+      "retained_variance": 39.06950615953637,
+      "retained_vs_pca": 1.0,
+      "shared_energy": -4.57565500806801,
+      "delta_energy": 74.29701446696427
+    },
+    {
+      "suite": "single-translation",
+      "method": "pca_surplus",
+      "d": 32,
+      "delta_trace_ratio": 2.129734755460799,
+      "commutator_ratio": 0.1829577142682344,
+      "probe_accuracy": 0.812,
+      "retained_variance": 25.484007586382933,
+      "retained_vs_pca": 0.6522736039283827,
+      "shared_energy": -0.5093738007573164,
+      "delta_energy": 40.39815915190396
+    },
+    {
+      "suite": "single-translation",
+      "method": "logdet_surplus",
+      "d": 32,
+      "delta_trace_ratio": 2.129734755460799,
+      "commutator_ratio": 0.1829577142682344,
+      "probe_accuracy": 0.6896666666666667,
+      "retained_variance": 13.082356269127253,
+      "retained_vs_pca": 0.3348482628806921,
+      "shared_energy": 10.442802176952206,
+      "delta_energy": 1.4044542960386668
+    },
+    {
+      "suite": "single-translation",
+      "method": "hard_whitened_invariance",
+      "d": 32,
+      "delta_trace_ratio": 2.129734755460799,
+      "commutator_ratio": 0.1829577142682344,
+      "probe_accuracy": 0.41433333333333333,
+      "retained_variance": 0.05679173708919451,
+      "retained_vs_pca": 0.0014536077537630296,
+      "shared_energy": 0.05679173708919422,
+      "delta_energy": -1.1968969229858229e-15
+    },
+    {
+      "suite": "single-translation",
+      "method": "shared_covariance",
+      "d": 32,
+      "delta_trace_ratio": 2.129734755460799,
+      "commutator_ratio": 0.1829577142682344,
+      "probe_accuracy": 0.8466666666666667,
+      "retained_variance": 18.625519257166793,
+      "retained_vs_pca": 0.47672778819141903,
+      "shared_energy": 15.243957626818077,
+      "delta_energy": 6.758459605156903
+    },
+    {
+      "suite": "single-translation",
+      "method": "auto_fisher",
+      "d": 32,
+      "delta_trace_ratio": 2.129734755460799,
+      "commutator_ratio": 0.1829577142682344,
+      "probe_accuracy": 0.8216666666666667,
+      "retained_variance": 15.543200517218745,
+      "retained_vs_pca": 0.3978345785521235,
+      "shared_energy": 12.8180831651656,
+      "delta_energy": 2.3033524414052815,
+      "floor": 0.1426322997680967
+    },
+    {
+      "suite": "blurring",
+      "method": "pca",
+      "d": 32,
+      "delta_trace_ratio": 0.0040339862485413444,
+      "commutator_ratio": 0.07999258804823506,
+      "probe_accuracy": 0.906,
+      "retained_variance": 39.06950615953636,
+      "retained_vs_pca": 1.0000000000000007,
+      "shared_energy": 38.16043266597674,
+      "delta_energy": 0.03356718775057704
+    },
+    {
+      "suite": "blurring",
+      "method": "pca_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.0040339862485413444,
+      "commutator_ratio": 0.07999258804823506,
+      "probe_accuracy": 0.906,
+      "retained_variance": 39.06950615953636,
+      "retained_vs_pca": 1.0000000000000007,
+      "shared_energy": 38.16043266597674,
+      "delta_energy": 0.03356718775057705
+    },
+    {
+      "suite": "blurring",
+      "method": "logdet_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.0040339862485413444,
+      "commutator_ratio": 0.07999258804823506,
+      "probe_accuracy": 0.906,
+      "retained_variance": 23.914916165776088,
+      "retained_vs_pca": 0.6121120668411312,
+      "shared_energy": 23.646499951513547,
+      "delta_energy": 0.004948033720175125
+    },
+    {
+      "suite": "blurring",
+      "method": "hard_whitened_invariance",
+      "d": 32,
+      "delta_trace_ratio": 0.0040339862485413444,
+      "commutator_ratio": 0.07999258804823506,
+      "probe_accuracy": 0.66,
+      "retained_variance": 0.0010561408619790367,
+      "retained_vs_pca": 2.703235760560662e-05,
+      "shared_energy": 0.0010561408619790373,
+      "delta_energy": -3.011783340914841e-20
+    },
+    {
+      "suite": "blurring",
+      "method": "shared_covariance",
+      "d": 32,
+      "delta_trace_ratio": 0.0040339862485413444,
+      "commutator_ratio": 0.07999258804823506,
+      "probe_accuracy": 0.9066666666666666,
+      "retained_variance": 39.06617468642477,
+      "retained_vs_pca": 0.9999147295822488,
+      "shared_energy": 38.16368556403129,
+      "delta_energy": 0.033007379785117835
+    },
+    {
+      "suite": "blurring",
+      "method": "auto_fisher",
+      "d": 32,
+      "delta_trace_ratio": 0.0040339862485413444,
+      "commutator_ratio": 0.07999258804823506,
+      "probe_accuracy": 0.9206666666666666,
+      "retained_variance": 29.389780085806542,
+      "retained_vs_pca": 0.7522434495536335,
+      "shared_energy": 28.97902097573849,
+      "delta_energy": 0.009507288111775572,
+      "floor": 0.00027023041083215263
+    },
+    {
+      "suite": "random-masking",
+      "method": "pca",
+      "d": 32,
+      "delta_trace_ratio": 0.23989556809739399,
+      "commutator_ratio": 0.16097314543924435,
+      "probe_accuracy": 0.906,
+      "retained_variance": 39.06950615953636,
+      "retained_vs_pca": 1.0,
+      "shared_energy": 29.721984929853974,
+      "delta_energy": 3.118744317343716
+    },
+    {
+      "suite": "random-masking",
+      "method": "pca_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.23989556809739399,
+      "commutator_ratio": 0.16097314543924435,
+      "probe_accuracy": 0.9033333333333333,
+      "retained_variance": 39.01723356744628,
+      "retained_vs_pca": 0.9986620616120249,
+      "shared_energy": 29.68984982508168,
+      "delta_energy": 3.108855536785798
+    },
+    {
+      "suite": "random-masking",
+      "method": "logdet_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.23989556809739399,
+      "commutator_ratio": 0.16097314543924435,
+      "probe_accuracy": 0.8526666666666667,
+      "retained_variance": 16.489243877642693,
+      "retained_vs_pca": 0.42204894554618994,
+      "shared_energy": 14.20504105528066,
+      "delta_energy": 0.500107502932199
+    },
+    {
+      "suite": "random-masking",
+      "method": "hard_whitened_invariance",
+      "d": 32,
+      "delta_trace_ratio": 0.23989556809739399,
+      "commutator_ratio": 0.16097314543924435,
+      "probe_accuracy": 0.6676666666666666,
+      "retained_variance": 0.010419954077836198,
+      "retained_vs_pca": 0.0002667029891621198,
+      "shared_energy": 0.010419954077836198,
+      "delta_energy": 1.38153024743715e-23
+    },
+    {
+      "suite": "random-masking",
+      "method": "shared_covariance",
+      "d": 32,
+      "delta_trace_ratio": 0.23989556809739399,
+      "commutator_ratio": 0.16097314543924435,
+      "probe_accuracy": 0.904,
+      "retained_variance": 38.72129303546558,
+      "retained_vs_pca": 0.9910873425773827,
+      "shared_energy": 29.99011953007439,
+      "delta_energy": 2.7733945955135173
+    },
+    {
+      "suite": "random-masking",
+      "method": "auto_fisher",
+      "d": 32,
+      "delta_trace_ratio": 0.23989556809739399,
+      "commutator_ratio": 0.16097314543924435,
+      "probe_accuracy": 0.8903333333333333,
+      "retained_variance": 17.975705201800544,
+      "retained_vs_pca": 0.46009553149708565,
+      "shared_energy": 16.064533195874247,
+      "delta_energy": 0.4129289138924766,
+      "floor": 0.01606631204198465
+    },
+    {
+      "suite": "block-masking",
+      "method": "pca",
+      "d": 32,
+      "delta_trace_ratio": 0.11111111111111109,
+      "commutator_ratio": 0.07455162696703418,
+      "probe_accuracy": 0.906,
+      "retained_variance": 39.06950615953636,
+      "retained_vs_pca": 1.0,
+      "shared_energy": 34.728449919587874,
+      "delta_energy": 3.2019295539885797
+    },
+    {
+      "suite": "block-masking",
+      "method": "pca_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.11111111111111109,
+      "commutator_ratio": 0.07455162696703418,
+      "probe_accuracy": 0.8176666666666667,
+      "retained_variance": 27.642237306732813,
+      "retained_vs_pca": 0.7075143769122277,
+      "shared_energy": 24.57087760598472,
+      "delta_energy": 1.6722558064898445
+    },
+    {
+      "suite": "block-masking",
+      "method": "logdet_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.11111111111111109,
+      "commutator_ratio": 0.07455162696703418,
+      "probe_accuracy": 0.7386666666666667,
+      "retained_variance": 8.63778725304831,
+      "retained_vs_pca": 0.22108769990019284,
+      "shared_energy": 7.678033113820719,
+      "delta_energy": 0.4788117240255662
+    },
+    {
+      "suite": "block-masking",
+      "method": "hard_whitened_invariance",
+      "d": 32,
+      "delta_trace_ratio": 0.11111111111111109,
+      "commutator_ratio": 0.07455162696703418,
+      "probe_accuracy": 0.11466666666666667,
+      "retained_variance": -1.440012398021486e-19,
+      "retained_vs_pca": -3.685770667643818e-21,
+      "shared_energy": -1.3229501953561311e-19,
+      "delta_energy": -1.612537133921388e-20
+    },
+    {
+      "suite": "block-masking",
+      "method": "shared_covariance",
+      "d": 32,
+      "delta_trace_ratio": 0.11111111111111109,
+      "commutator_ratio": 0.07455162696703418,
+      "probe_accuracy": 0.906,
+      "retained_variance": 39.06950615953636,
+      "retained_vs_pca": 1.0,
+      "shared_energy": 34.728449919587874,
+      "delta_energy": 3.20192955398858
+    },
+    {
+      "suite": "block-masking",
+      "method": "auto_fisher",
+      "d": 32,
+      "delta_trace_ratio": 0.11111111111111109,
+      "commutator_ratio": 0.07455162696703418,
+      "probe_accuracy": 0.862,
+      "retained_variance": 21.157428564550255,
+      "retained_vs_pca": 0.5415330431399886,
+      "shared_energy": 18.806603168489104,
+      "delta_energy": 1.0128530911841687,
+      "floor": 0.007441381354109389
+    }
+  ],
+  "graph": [
+    {
+      "suite": "1nn-graph",
+      "method": "pca",
+      "d": 32,
+      "delta_trace_ratio": 0.5020977293280487,
+      "commutator_ratio": 0.05381253008128146,
+      "probe_accuracy": 0.9063333333333333,
+      "retained_variance": 39.07871489559113,
+      "retained_vs_pca": 1.0,
+      "shared_energy": 33.292587398616995,
+      "delta_energy": 11.194162799121111
+    },
+    {
+      "suite": "1nn-graph",
+      "method": "pca_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.5020977293280487,
+      "commutator_ratio": 0.05381253008128146,
+      "probe_accuracy": 0.8726666666666667,
+      "retained_variance": 32.57542170794983,
+      "retained_vs_pca": 0.8335847735777256,
+      "shared_energy": 28.916810403397882,
+      "delta_energy": 7.410542625127464
+    },
+    {
+      "suite": "1nn-graph",
+      "method": "logdet_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.5020977293280487,
+      "commutator_ratio": 0.05381253008128146,
+      "probe_accuracy": 0.907,
+      "retained_variance": 32.95731629154156,
+      "retained_vs_pca": 0.8433572183628743,
+      "shared_energy": 29.078845502496282,
+      "delta_energy": 7.7310174003301775
+    },
+    {
+      "suite": "1nn-graph",
+      "method": "hard_whitened_invariance",
+      "d": 32,
+      "delta_trace_ratio": 0.5020977293280487,
+      "commutator_ratio": 0.05381253008128146,
+      "probe_accuracy": 0.11466666666666667,
+      "retained_variance": -3.5649607721266205e-19,
+      "retained_vs_pca": -9.122512809470149e-21,
+      "shared_energy": -4.859511335040944e-24,
+      "delta_energy": 2.751088546021036e-21
+    },
+    {
+      "suite": "1nn-graph",
+      "method": "shared_covariance",
+      "d": 32,
+      "delta_trace_ratio": 0.5020977293280487,
+      "commutator_ratio": 0.05381253008128146,
+      "probe_accuracy": 0.9066666666666666,
+      "retained_variance": 38.97878072068613,
+      "retained_vs_pca": 0.9974427466416949,
+      "shared_energy": 33.36939729465118,
+      "delta_energy": 11.002508052247112
+    },
+    {
+      "suite": "1nn-graph",
+      "method": "auto_fisher",
+      "d": 32,
+      "delta_trace_ratio": 0.5020977293280487,
+      "commutator_ratio": 0.05381253008128146,
+      "probe_accuracy": 0.9073333333333333,
+      "retained_variance": 30.962712301172292,
+      "retained_vs_pca": 0.7923165432613934,
+      "shared_energy": 26.88085926971602,
+      "delta_energy": 7.892643148566673,
+      "floor": 0.03363267023299301
+    },
+    {
+      "suite": "5nn-mean-graph",
+      "method": "pca",
+      "d": 32,
+      "delta_trace_ratio": 0.2840680826810967,
+      "commutator_ratio": 0.05028192993213585,
+      "probe_accuracy": 0.9056666666666666,
+      "retained_variance": 39.08196612494519,
+      "retained_vs_pca": 1.0,
+      "shared_energy": 32.31518018110545,
+      "delta_energy": 5.8741890332054405
+    },
+    {
+      "suite": "5nn-mean-graph",
+      "method": "pca_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.2840680826810967,
+      "commutator_ratio": 0.05028192993213585,
+      "probe_accuracy": 0.8873333333333333,
+      "retained_variance": 33.17951275236548,
+      "retained_vs_pca": 0.8489724556408053,
+      "shared_energy": 28.643619931168132,
+      "delta_energy": 3.933575966740066
+    },
+    {
+      "suite": "5nn-mean-graph",
+      "method": "logdet_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.2840680826810967,
+      "commutator_ratio": 0.05028192993213585,
+      "probe_accuracy": 0.8903333333333333,
+      "retained_variance": 33.44182562686743,
+      "retained_vs_pca": 0.855684320485663,
+      "shared_energy": 28.85311203825589,
+      "delta_energy": 4.034734687720235
+    },
+    {
+      "suite": "5nn-mean-graph",
+      "method": "hard_whitened_invariance",
+      "d": 32,
+      "delta_trace_ratio": 0.2840680826810967,
+      "commutator_ratio": 0.05028192993213585,
+      "probe_accuracy": 0.11466666666666667,
+      "retained_variance": -2.2314149187046072e-19,
+      "retained_vs_pca": -5.709576922437232e-21,
+      "shared_energy": -4.0357451233792817e-23,
+      "delta_energy": 4.172337890600328e-21
+    },
+    {
+      "suite": "5nn-mean-graph",
+      "method": "shared_covariance",
+      "d": 32,
+      "delta_trace_ratio": 0.2840680826810967,
+      "commutator_ratio": 0.05028192993213585,
+      "probe_accuracy": 0.9053333333333333,
+      "retained_variance": 38.96602617203477,
+      "retained_vs_pca": 0.9970334155518237,
+      "shared_energy": 32.398952155887144,
+      "delta_energy": 5.735461358712326
+    },
+    {
+      "suite": "5nn-mean-graph",
+      "method": "auto_fisher",
+      "d": 32,
+      "delta_trace_ratio": 0.2840680826810967,
+      "commutator_ratio": 0.05028192993213585,
+      "probe_accuracy": 0.9003333333333333,
+      "retained_variance": 32.46587077357087,
+      "retained_vs_pca": 0.8307123206078568,
+      "shared_energy": 27.496326997937572,
+      "delta_energy": 4.318062904691651,
+      "floor": 0.0190293024383536
+    },
+    {
+      "suite": "mutual-10nn-graph",
+      "method": "pca",
+      "d": 32,
+      "delta_trace_ratio": 0.5190576467331333,
+      "commutator_ratio": 0.05428702742939674,
+      "probe_accuracy": 0.9063333333333333,
+      "retained_variance": 39.07385877210589,
+      "retained_vs_pca": 1.0000000000000002,
+      "shared_energy": 33.18580046190888,
+      "delta_energy": 11.626936530768688
+    },
+    {
+      "suite": "mutual-10nn-graph",
+      "method": "pca_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.5190576467331333,
+      "commutator_ratio": 0.05428702742939674,
+      "probe_accuracy": 0.864,
+      "retained_variance": 31.90296859747109,
+      "retained_vs_pca": 0.8164785767267511,
+      "shared_energy": 28.33516740710792,
+      "delta_energy": 7.3585900819600445
+    },
+    {
+      "suite": "mutual-10nn-graph",
+      "method": "logdet_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.5190576467331333,
+      "commutator_ratio": 0.05428702742939674,
+      "probe_accuracy": 0.905,
+      "retained_variance": 32.8232932066605,
+      "retained_vs_pca": 0.8400320377390638,
+      "shared_energy": 28.89035089052905,
+      "delta_energy": 7.977131620787823
+    },
+    {
+      "suite": "mutual-10nn-graph",
+      "method": "hard_whitened_invariance",
+      "d": 32,
+      "delta_trace_ratio": 0.5190576467331333,
+      "commutator_ratio": 0.05428702742939674,
+      "probe_accuracy": 0.11466666666666667,
+      "retained_variance": -6.450354886730357e-20,
+      "retained_vs_pca": -1.6508108206950749e-21,
+      "shared_energy": -5.673147067061372e-23,
+      "delta_energy": -4.513379158483336e-22
+    },
+    {
+      "suite": "mutual-10nn-graph",
+      "method": "shared_covariance",
+      "d": 32,
+      "delta_trace_ratio": 0.5190576467331333,
+      "commutator_ratio": 0.05428702742939674,
+      "probe_accuracy": 0.9076666666666666,
+      "retained_variance": 38.98044082467857,
+      "retained_vs_pca": 0.9976091957548352,
+      "shared_energy": 33.25798550832878,
+      "delta_energy": 11.414824819229867
+    },
+    {
+      "suite": "mutual-10nn-graph",
+      "method": "auto_fisher",
+      "d": 32,
+      "delta_trace_ratio": 0.5190576467331333,
+      "commutator_ratio": 0.05428702742939674,
+      "probe_accuracy": 0.9073333333333333,
+      "retained_variance": 30.571703617406445,
+      "retained_vs_pca": 0.7824081004057635,
+      "shared_energy": 26.53394768058827,
+      "delta_energy": 7.995407129809067,
+      "floor": 0.034765409652458154
+    },
+    {
+      "suite": "affinity-10nn-mean-graph",
+      "method": "pca",
+      "d": 32,
+      "delta_trace_ratio": 0.2636263137299306,
+      "commutator_ratio": 0.04921033976345685,
+      "probe_accuracy": 0.9063333333333333,
+      "retained_variance": 39.081543087811895,
+      "retained_vs_pca": 1.0,
+      "shared_energy": 31.736436422339086,
+      "delta_energy": 5.3394932169358205
+    },
+    {
+      "suite": "affinity-10nn-mean-graph",
+      "method": "pca_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.2636263137299306,
+      "commutator_ratio": 0.04921033976345685,
+      "probe_accuracy": 0.8876666666666667,
+      "retained_variance": 33.179149968156565,
+      "retained_vs_pca": 0.8489723625704004,
+      "shared_energy": 28.21090248980383,
+      "delta_energy": 3.5334862554594753
+    },
+    {
+      "suite": "affinity-10nn-mean-graph",
+      "method": "logdet_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.2636263137299306,
+      "commutator_ratio": 0.04921033976345685,
+      "probe_accuracy": 0.8913333333333333,
+      "retained_variance": 33.3796483327429,
+      "retained_vs_pca": 0.854102619687829,
+      "shared_energy": 28.393927749936058,
+      "delta_energy": 3.5983964648477587
+    },
+    {
+      "suite": "affinity-10nn-mean-graph",
+      "method": "hard_whitened_invariance",
+      "d": 32,
+      "delta_trace_ratio": 0.2636263137299306,
+      "commutator_ratio": 0.04921033976345685,
+      "probe_accuracy": 0.11466666666666667,
+      "retained_variance": -2.153602472573193e-19,
+      "retained_vs_pca": -5.510535926727067e-21,
+      "shared_energy": 1.7540607575726548e-23,
+      "delta_energy": -4.146757146891035e-21
+    },
+    {
+      "suite": "affinity-10nn-mean-graph",
+      "method": "shared_covariance",
+      "d": 32,
+      "delta_trace_ratio": 0.2636263137299306,
+      "commutator_ratio": 0.04921033976345685,
+      "probe_accuracy": 0.906,
+      "retained_variance": 38.958319061279205,
+      "retained_vs_pca": 0.9968470020168902,
+      "shared_energy": 31.823080632039442,
+      "delta_energy": 5.196805990278912
+    },
+    {
+      "suite": "affinity-10nn-mean-graph",
+      "method": "auto_fisher",
+      "d": 32,
+      "delta_trace_ratio": 0.2636263137299306,
+      "commutator_ratio": 0.04921033976345685,
+      "probe_accuracy": 0.8996666666666666,
+      "retained_variance": 32.81314534686263,
+      "retained_vs_pca": 0.8396072098057933,
+      "shared_energy": 27.3432156451154,
+      "delta_energy": 3.939896907260757,
+      "floor": 0.01765979002848493
+    }
+  ],
+  "channel": [
+    {
+      "suite": "sign-64-sketch",
+      "method": "pca",
+      "d": 32,
+      "delta_trace_ratio": 0.2952671893801435,
+      "commutator_ratio": 0.056665574206091786,
+      "probe_accuracy": 0.906,
+      "retained_variance": 39.06950615953637,
+      "retained_vs_pca": 1.0,
+      "shared_energy": 33.09078538328967,
+      "delta_energy": 5.976367021363732
+    },
+    {
+      "suite": "sign-64-sketch",
+      "method": "pca_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.2952671893801435,
+      "commutator_ratio": 0.056665574206091786,
+      "probe_accuracy": 0.8856666666666667,
+      "retained_variance": 34.25571869832736,
+      "retained_vs_pca": 0.8767891398075932,
+      "shared_energy": 29.989515714476106,
+      "delta_energy": 4.264398662700398
+    },
+    {
+      "suite": "sign-64-sketch",
+      "method": "logdet_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.2952671893801435,
+      "commutator_ratio": 0.056665574206091786,
+      "probe_accuracy": 0.8876666666666667,
+      "retained_variance": 33.74732527499099,
+      "retained_vs_pca": 0.8637766020688158,
+      "shared_energy": 29.645411553701287,
+      "delta_energy": 4.0999879909752535
+    },
+    {
+      "suite": "sign-64-sketch",
+      "method": "hard_whitened_invariance",
+      "d": 32,
+      "delta_trace_ratio": 0.2952671893801435,
+      "commutator_ratio": 0.056665574206091786,
+      "probe_accuracy": 0.11466666666666667,
+      "retained_variance": 3.2970267937378204e-19,
+      "retained_vs_pca": 8.438875014889479e-21,
+      "shared_energy": 9.511211241908784e-23,
+      "delta_energy": -1.8255759208584254e-21
+    },
+    {
+      "suite": "sign-64-sketch",
+      "method": "shared_covariance",
+      "d": 32,
+      "delta_trace_ratio": 0.2952671893801435,
+      "commutator_ratio": 0.056665574206091786,
+      "probe_accuracy": 0.9063333333333333,
+      "retained_variance": 38.961055904802215,
+      "retained_vs_pca": 0.9972241713450049,
+      "shared_energy": 33.17861428227299,
+      "delta_energy": 5.780083411432795
+    },
+    {
+      "suite": "sign-64-sketch",
+      "method": "auto_fisher",
+      "d": 32,
+      "delta_trace_ratio": 0.2952671893801435,
+      "commutator_ratio": 0.056665574206091786,
+      "probe_accuracy": 0.8956666666666667,
+      "retained_variance": 30.14371754487647,
+      "retained_vs_pca": 0.7715407873800005,
+      "shared_energy": 26.198370983241823,
+      "delta_energy": 3.943426273762367,
+      "floor": 0.019774650818377995
+    },
+    {
+      "suite": "sparse-64-sketch",
+      "method": "pca",
+      "d": 32,
+      "delta_trace_ratio": 0.29991268952519523,
+      "commutator_ratio": 0.05591494258745046,
+      "probe_accuracy": 0.906,
+      "retained_variance": 39.06950615953636,
+      "retained_vs_pca": 1.0,
+      "shared_energy": 32.86639856654938,
+      "delta_energy": 6.172024119768238
+    },
+    {
+      "suite": "sparse-64-sketch",
+      "method": "pca_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.29991268952519523,
+      "commutator_ratio": 0.05591494258745046,
+      "probe_accuracy": 0.8763333333333333,
+      "retained_variance": 33.74819172844106,
+      "retained_vs_pca": 0.8637987792994809,
+      "shared_energy": 29.4753395996115,
+      "delta_energy": 4.249918703234974
+    },
+    {
+      "suite": "sparse-64-sketch",
+      "method": "logdet_surplus",
+      "d": 32,
+      "delta_trace_ratio": 0.29991268952519523,
+      "commutator_ratio": 0.05591494258745046,
+      "probe_accuracy": 0.8913333333333333,
+      "retained_variance": 32.936720701048955,
+      "retained_vs_pca": 0.8430288462453353,
+      "shared_energy": 28.916213848400762,
+      "delta_energy": 3.9959893103004585
+    },
+    {
+      "suite": "sparse-64-sketch",
+      "method": "hard_whitened_invariance",
+      "d": 32,
+      "delta_trace_ratio": 0.29991268952519523,
+      "commutator_ratio": 0.05591494258745046,
+      "probe_accuracy": 0.11466666666666667,
+      "retained_variance": 1.23731962404341e-19,
+      "retained_vs_pca": 3.1669702171072776e-21,
+      "shared_energy": 1.8088928314739654e-23,
+      "delta_energy": 1.853640052923001e-21
+    },
+    {
+      "suite": "sparse-64-sketch",
+      "method": "shared_covariance",
+      "d": 32,
+      "delta_trace_ratio": 0.29991268952519523,
+      "commutator_ratio": 0.05591494258745046,
+      "probe_accuracy": 0.903,
+      "retained_variance": 38.95026976460351,
+      "retained_vs_pca": 0.9969480956722115,
+      "shared_energy": 32.9623671107602,
+      "delta_energy": 5.956692801926016
+    },
+    {
+      "suite": "sparse-64-sketch",
+      "method": "auto_fisher",
+      "d": 32,
+      "delta_trace_ratio": 0.29991268952519523,
+      "commutator_ratio": 0.05591494258745046,
+      "probe_accuracy": 0.9016666666666666,
+      "retained_variance": 30.079428062111894,
+      "retained_vs_pca": 0.7698952717570989,
+      "shared_energy": 26.04064553571768,
+      "delta_energy": 4.013307442275107,
+      "floor": 0.020085768461758306
+    }
+  ],
+  "layerwise": [
+    {
+      "suite": "single-translation",
+      "pair_mode": "suite",
+      "method": "pca",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.478,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.45090299226697,
+          "shared_energy": -3.7212671455720927,
+          "delta_energy": 105.7512948176554,
+          "commutator_ratio": 0.1829577142682344
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 86.57023106189511,
+          "shared_energy": -0.6035064400294015,
+          "delta_energy": 219.7506777558915,
+          "commutator_ratio": 0.08669658487220863
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.77525688641207,
+          "shared_energy": -0.15447584483424626,
+          "delta_energy": 87.64329619109023,
+          "commutator_ratio": 0.0395810268724101
+        }
+      ],
+      "first_layer_commutator_ratio": 0.1829577142682344
+    },
+    {
+      "suite": "single-translation",
+      "pair_mode": "suite",
+      "method": "pca_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.40166666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 30.550735450740135,
+          "shared_energy": -1.1849822831786445,
+          "delta_energy": 51.368360584416635,
+          "commutator_ratio": 0.1829577142682344
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 76.0017105850899,
+          "shared_energy": 7.350458068666088,
+          "delta_energy": 354.4316144530494,
+          "commutator_ratio": 0.5112026249133809
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 31.792300243648725,
+          "shared_energy": 1.55652198912892,
+          "delta_energy": 122.47079484759134,
+          "commutator_ratio": 0.28343421832507265
+        }
+      ],
+      "first_layer_commutator_ratio": 0.1829577142682344
+    },
+    {
+      "suite": "single-translation",
+      "pair_mode": "suite",
+      "method": "logdet_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.6946666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 29.714021209390534,
+          "shared_energy": 13.261987617261449,
+          "delta_energy": 20.321276954374028,
+          "commutator_ratio": 0.1829577142682344
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 82.63196525805782,
+          "shared_energy": 41.894916111449724,
+          "delta_energy": 38.92201553972915,
+          "commutator_ratio": 0.12060862509113272
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 33.70149466813859,
+          "shared_energy": 20.080829837959435,
+          "delta_energy": 11.565541615182248,
+          "commutator_ratio": 0.0763544939683031
+        }
+      ],
+      "first_layer_commutator_ratio": 0.1829577142682344
+    },
+    {
+      "suite": "single-translation",
+      "pair_mode": "suite",
+      "method": "hard_whitened_invariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.35033333333333333,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 7.734269042323448,
+          "shared_energy": 7.638700074246807,
+          "delta_energy": 0.08066100171043887,
+          "commutator_ratio": 0.1829577142682344
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 6.716263630954641,
+          "shared_energy": 6.716263630955936,
+          "delta_energy": 8.552818904322942e-21,
+          "commutator_ratio": 0.06909264766257207
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 34.94568974614924,
+          "shared_energy": 34.945689746152695,
+          "delta_energy": 9.566952267198612e-21,
+          "commutator_ratio": 1.9833999788051393e-08
+        }
+      ],
+      "first_layer_commutator_ratio": 0.1829577142682344
+    },
+    {
+      "suite": "single-translation",
+      "pair_mode": "suite",
+      "method": "shared_covariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.4796666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 23.869820762350145,
+          "shared_energy": 17.95789252923742,
+          "delta_energy": 11.630573183678102,
+          "commutator_ratio": 0.1829577142682344
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 76.96477444342722,
+          "shared_energy": 48.541241719979126,
+          "delta_energy": 56.11838770484626,
+          "commutator_ratio": 0.03720350934762056
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 35.590108720027104,
+          "shared_energy": 21.843086630714588,
+          "delta_energy": 27.61639194425037,
+          "commutator_ratio": 0.022304987266879312
+        }
+      ],
+      "first_layer_commutator_ratio": 0.1829577142682344
+    },
+    {
+      "suite": "single-translation",
+      "pair_mode": "suite",
+      "method": "auto_fisher",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.6196666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 36.790536293226346,
+          "shared_energy": 8.575675601225996,
+          "delta_energy": 49.97156152425516,
+          "commutator_ratio": 0.1829577142682344,
+          "floor": 0.1426322997680967
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 72.60585881446838,
+          "shared_energy": 24.125605153772106,
+          "delta_energy": 74.58206136015733,
+          "commutator_ratio": 0.03311279064264042,
+          "floor": 2.4030893850451656
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 33.55786053380642,
+          "shared_energy": 11.847994341569352,
+          "delta_energy": 31.257148657815335,
+          "commutator_ratio": 0.021393162985895702,
+          "floor": 1.180066743998077
+        }
+      ],
+      "first_layer_commutator_ratio": 0.1829577142682344
+    },
+    {
+      "suite": "blurring",
+      "pair_mode": "suite",
+      "method": "pca",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.415,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.450902992266954,
+          "shared_energy": 49.49217733387794,
+          "delta_energy": 0.16286579133909282,
+          "commutator_ratio": 0.07999258804823506
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 82.46147597719853,
+          "shared_energy": 73.8754312407151,
+          "delta_energy": 2.745872864038221,
+          "commutator_ratio": 0.14950753503329592
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.01356947180384,
+          "shared_energy": 32.54501153640365,
+          "delta_energy": 1.250927310569661,
+          "commutator_ratio": 0.1399647211334257
+        }
+      ],
+      "first_layer_commutator_ratio": 0.07999258804823506
+    },
+    {
+      "suite": "blurring",
+      "pair_mode": "suite",
+      "method": "pca_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.6276666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 41.712872280900285,
+          "shared_energy": 40.666829851610956,
+          "delta_energy": 0.04343434439316222,
+          "commutator_ratio": 0.07999258804823506
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 82.2814249924612,
+          "shared_energy": 70.38285406237078,
+          "delta_energy": 19.832615089414908,
+          "commutator_ratio": 0.038240484709785826
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 29.6141362551191,
+          "shared_energy": 24.765859279050318,
+          "delta_energy": 5.927122886591133,
+          "commutator_ratio": 0.4114031845414853
+        }
+      ],
+      "first_layer_commutator_ratio": 0.07999258804823506
+    },
+    {
+      "suite": "blurring",
+      "pair_mode": "suite",
+      "method": "logdet_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.7863333333333333,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 38.92650246308497,
+          "shared_energy": 38.10774120520958,
+          "delta_energy": 0.029134645788140283,
+          "commutator_ratio": 0.07999258804823506
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 79.53121185342142,
+          "shared_energy": 77.29023271209714,
+          "delta_energy": 0.09668326432939708,
+          "commutator_ratio": 0.1080714221335638
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 34.65283632776538,
+          "shared_energy": 33.857120707846576,
+          "delta_energy": 0.027222971557237588,
+          "commutator_ratio": 0.14751579137785167
+        }
+      ],
+      "first_layer_commutator_ratio": 0.07999258804823506
+    },
+    {
+      "suite": "blurring",
+      "pair_mode": "suite",
+      "method": "hard_whitened_invariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.5166666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 21.587623784809985,
+          "shared_energy": 21.26260871706744,
+          "delta_energy": 0.011859210223975429,
+          "commutator_ratio": 0.07999258804823506
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 17.491147400418786,
+          "shared_energy": 17.491147400418782,
+          "delta_energy": 4.171247835948777e-27,
+          "commutator_ratio": 0.32381735635544406
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 35.179559870550705,
+          "shared_energy": 35.179559870550705,
+          "delta_energy": 4.515410248925592e-27,
+          "commutator_ratio": 1.5873946068137532e-14
+        }
+      ],
+      "first_layer_commutator_ratio": 0.07999258804823506
+    },
+    {
+      "suite": "blurring",
+      "pair_mode": "suite",
+      "method": "shared_covariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.505,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.44778010188772,
+          "shared_energy": 49.49495292341835,
+          "delta_energy": 0.16112802136871404,
+          "commutator_ratio": 0.07999258804823506
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 81.36145725247698,
+          "shared_energy": 73.94089167223565,
+          "delta_energy": 2.327413453308859,
+          "commutator_ratio": 0.1254951826594664
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.169855979581484,
+          "shared_energy": 33.57659805336577,
+          "delta_energy": 0.9530135321436075,
+          "commutator_ratio": 0.13632212982322206
+        }
+      ],
+      "first_layer_commutator_ratio": 0.07999258804823506
+    },
+    {
+      "suite": "blurring",
+      "pair_mode": "suite",
+      "method": "auto_fisher",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.564,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 49.24545999620975,
+          "shared_energy": 47.44324651043464,
+          "delta_energy": 0.14265499211085875,
+          "commutator_ratio": 0.07999258804823506,
+          "floor": 0.00027023041083215263
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 78.95811584249697,
+          "shared_energy": 74.10165087536973,
+          "delta_energy": 0.4238104214417973,
+          "commutator_ratio": 0.11583910285789191,
+          "floor": 0.02269865696714298
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 32.29965811360657,
+          "shared_energy": 30.67633698972566,
+          "delta_energy": 0.12934628933817405,
+          "commutator_ratio": 0.08784088324964406,
+          "floor": 0.00834672035345344
+        }
+      ],
+      "first_layer_commutator_ratio": 0.07999258804823506
+    },
+    {
+      "suite": "1nn-graph-refresh",
+      "pair_mode": "graph_refresh",
+      "method": "pca",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.46,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.46055764612842,
+          "shared_energy": 38.433063041482285,
+          "delta_energy": 24.53758708022367,
+          "commutator_ratio": 0.05381253008128146
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 82.99081732908803,
+          "shared_energy": 29.28056067513475,
+          "delta_energy": 83.83058534134491,
+          "commutator_ratio": 0.035404033074397975
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 35.997403262856395,
+          "shared_energy": 16.92839604337821,
+          "delta_energy": 27.605170505025406,
+          "commutator_ratio": 0.015691501660439887
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05381253008128146
+    },
+    {
+      "suite": "1nn-graph-refresh",
+      "pair_mode": "graph_refresh",
+      "method": "pca_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.38266666666666665,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 33.18717310750554,
+          "shared_energy": 29.34553192547933,
+          "delta_energy": 7.732761415057644,
+          "commutator_ratio": 0.05381253008128146
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 65.86786559346488,
+          "shared_energy": 35.51009655287749,
+          "delta_energy": 26.6571455555732,
+          "commutator_ratio": 0.06674665018523757
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 12.313195860529397,
+          "shared_energy": 8.81020394202805,
+          "delta_energy": 2.826268798220072,
+          "commutator_ratio": 0.1567117944293627
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05381253008128146
+    },
+    {
+      "suite": "1nn-graph-refresh",
+      "pair_mode": "graph_refresh",
+      "method": "logdet_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.3443333333333333,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 34.23316432820397,
+          "shared_energy": 29.97455107807207,
+          "delta_energy": 8.387557812228602,
+          "commutator_ratio": 0.05381253008128146
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 87.76505077649486,
+          "shared_energy": 75.33118705780484,
+          "delta_energy": 17.7725938070027,
+          "commutator_ratio": 0.03866826923536636
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 9.534684927815384,
+          "shared_energy": 8.961512649290652,
+          "delta_energy": 0.7937060844435165,
+          "commutator_ratio": 0.02527186456982534
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05381253008128146
+    },
+    {
+      "suite": "1nn-graph-refresh",
+      "pair_mode": "graph_refresh",
+      "method": "hard_whitened_invariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.11466666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 3.9564483694919597,
+          "shared_energy": 3.367419738365647,
+          "delta_energy": 1.1761170360514042,
+          "commutator_ratio": 0.05381253008128146
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 5.116148112185842e-28,
+          "shared_energy": 1.1355061125293935e-28,
+          "delta_energy": 4.3901174004922345e-28,
+          "commutator_ratio": 0.047417032589355396
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 4.4265921351377004e-26,
+          "shared_energy": 1.4606494179781366e-26,
+          "delta_energy": 4.319492650878239e-26,
+          "commutator_ratio": 1.261254450761121e-37
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05381253008128146
+    },
+    {
+      "suite": "1nn-graph-refresh",
+      "pair_mode": "graph_refresh",
+      "method": "shared_covariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.5433333333333333,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.046533586234986,
+          "shared_energy": 38.53900779827913,
+          "delta_energy": 23.59540412826145,
+          "commutator_ratio": 0.05381253008128146
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 79.93049623649937,
+          "shared_energy": 35.83874918227093,
+          "delta_energy": 75.32427052573252,
+          "commutator_ratio": 0.03699166531310123
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.20254755703225,
+          "shared_energy": 20.415828820889185,
+          "delta_energy": 24.644865964334038,
+          "commutator_ratio": 0.01557637354986044
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05381253008128146
+    },
+    {
+      "suite": "1nn-graph-refresh",
+      "pair_mode": "graph_refresh",
+      "method": "auto_fisher",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.47533333333333333,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 49.25555712239242,
+          "shared_energy": 36.73107952981036,
+          "delta_energy": 23.5081712253925,
+          "commutator_ratio": 0.05381253008128146,
+          "floor": 0.03363267023299301
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 78.26021298291563,
+          "shared_energy": 27.435358129490552,
+          "delta_energy": 69.35124631952061,
+          "commutator_ratio": 0.03600905531832216,
+          "floor": 1.1276686653281451
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.33660937511777,
+          "shared_energy": 17.160119329268092,
+          "delta_energy": 26.42271325370337,
+          "commutator_ratio": 0.017166426427888577,
+          "floor": 0.7981671935904443
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05381253008128146
+    },
+    {
+      "suite": "5nn-mean-graph-refresh",
+      "pair_mode": "graph_mean_refresh",
+      "method": "pca",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.467,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.46379465649691,
+          "shared_energy": 36.886900084115936,
+          "delta_energy": 13.77884375092852,
+          "commutator_ratio": 0.05028192993213585
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 83.40023777362123,
+          "shared_energy": 24.717808136243264,
+          "delta_energy": 59.729447002177665,
+          "commutator_ratio": 0.045552266134745154
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.075117160580305,
+          "shared_energy": 15.50787693815491,
+          "delta_energy": 16.924438516512748,
+          "commutator_ratio": 0.025529792845189185
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05028192993213585
+    },
+    {
+      "suite": "5nn-mean-graph-refresh",
+      "pair_mode": "graph_mean_refresh",
+      "method": "pca_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.338,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 33.80962979132082,
+          "shared_energy": 29.050089221004257,
+          "delta_energy": 4.124183813167327,
+          "commutator_ratio": 0.05028192993213585
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 60.570962549354306,
+          "shared_energy": 28.922296403385985,
+          "delta_energy": 23.504710053228994,
+          "commutator_ratio": 0.0694457173671629
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 11.962259855767588,
+          "shared_energy": 7.34407429096155,
+          "delta_energy": 2.845090136871206,
+          "commutator_ratio": 0.16293853501497532
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05028192993213585
+    },
+    {
+      "suite": "5nn-mean-graph-refresh",
+      "pair_mode": "graph_mean_refresh",
+      "method": "logdet_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.2663333333333333,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 35.3290208761755,
+          "shared_energy": 30.07256906822701,
+          "delta_energy": 4.587828112231832,
+          "commutator_ratio": 0.05028192993213585
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 95.87842413674142,
+          "shared_energy": 82.4167189726594,
+          "delta_energy": 7.024579295831061,
+          "commutator_ratio": 0.04445379882233183
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 9.292876733932399,
+          "shared_energy": 8.509835854989582,
+          "delta_energy": 0.3478802650502138,
+          "commutator_ratio": 0.05539807460169969
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05028192993213585
+    },
+    {
+      "suite": "5nn-mean-graph-refresh",
+      "pair_mode": "graph_mean_refresh",
+      "method": "hard_whitened_invariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.11466666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 6.281324761421895,
+          "shared_energy": 5.077886036881032,
+          "delta_energy": 1.0926194732440493,
+          "commutator_ratio": 0.05028192993213585
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 6.51025232315007e-28,
+          "shared_energy": 1.765496643666104e-28,
+          "delta_energy": 4.884127736058189e-28,
+          "commutator_ratio": 0.043975508437691664
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 7.594563681932153e-26,
+          "shared_energy": 2.1873357361267993e-26,
+          "delta_energy": 5.274926601904033e-26,
+          "commutator_ratio": 3.0173533700949226e-37
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05028192993213585
+    },
+    {
+      "suite": "5nn-mean-graph-refresh",
+      "pair_mode": "graph_mean_refresh",
+      "method": "shared_covariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.5363333333333333,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.197299055999835,
+          "shared_energy": 36.937400546226996,
+          "delta_energy": 13.392301832334626,
+          "commutator_ratio": 0.05028192993213585
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 78.14242954063077,
+          "shared_energy": 27.624218924720907,
+          "delta_energy": 51.47678757272438,
+          "commutator_ratio": 0.05219578942935731
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.83415942415213,
+          "shared_energy": 18.621084504964763,
+          "delta_energy": 14.72022646809736,
+          "commutator_ratio": 0.028393275983605786
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05028192993213585
+    },
+    {
+      "suite": "5nn-mean-graph-refresh",
+      "pair_mode": "graph_mean_refresh",
+      "method": "auto_fisher",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.41433333333333333,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 49.98975523266825,
+          "shared_energy": 35.78561003084969,
+          "delta_energy": 13.405855999687782,
+          "commutator_ratio": 0.05028192993213585,
+          "floor": 0.0190293024383536
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 76.92172005579587,
+          "shared_energy": 24.487885144684576,
+          "delta_energy": 48.50354728812094,
+          "commutator_ratio": 0.048162995409051224,
+          "floor": 0.7939761757155376
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 34.929315788008694,
+          "shared_energy": 15.655592782909409,
+          "delta_energy": 15.47346966727704,
+          "commutator_ratio": 0.01774068619177647,
+          "floor": 0.49861466729618376
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05028192993213585
+    },
+    {
+      "suite": "mutual-10nn-graph-refresh",
+      "pair_mode": "graph_mutual_refresh",
+      "method": "pca",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.44866666666666666,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.455561909729795,
+          "shared_energy": 38.25946431747736,
+          "delta_energy": 25.391354753833312,
+          "commutator_ratio": 0.05428702742939674
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 82.49938205593678,
+          "shared_energy": 31.509284399780576,
+          "delta_energy": 83.1603899217794,
+          "commutator_ratio": 0.029431003949347966
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 35.9907747444,
+          "shared_energy": 18.230820345587443,
+          "delta_energy": 28.04952786687609,
+          "commutator_ratio": 0.014960005330821525
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05428702742939674
+    },
+    {
+      "suite": "mutual-10nn-graph-refresh",
+      "pair_mode": "graph_mutual_refresh",
+      "method": "pca_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.34,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 33.1825306604773,
+          "shared_energy": 29.23772976822226,
+          "delta_energy": 8.038450106271346,
+          "commutator_ratio": 0.05428702742939674
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 54.44499896997146,
+          "shared_energy": 31.212278919831917,
+          "delta_energy": 20.893519539895134,
+          "commutator_ratio": 0.0653488420528607
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 10.537884012324188,
+          "shared_energy": 8.04182050492293,
+          "delta_energy": 1.8778686921130778,
+          "commutator_ratio": 0.13747057156219727
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05428702742939674
+    },
+    {
+      "suite": "mutual-10nn-graph-refresh",
+      "pair_mode": "graph_mutual_refresh",
+      "method": "logdet_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.32566666666666666,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 34.16557516531391,
+          "shared_energy": 29.848594174426307,
+          "delta_energy": 8.675717046707618,
+          "commutator_ratio": 0.05428702742939674
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 89.68200613149489,
+          "shared_energy": 77.72942432461838,
+          "delta_energy": 19.442099483073676,
+          "commutator_ratio": 0.04439025211926101
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 8.703113549556218,
+          "shared_energy": 8.172898103819715,
+          "delta_energy": 0.7817047356374784,
+          "commutator_ratio": 0.03380538972852216
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05428702742939674
+    },
+    {
+      "suite": "mutual-10nn-graph-refresh",
+      "pair_mode": "graph_mutual_refresh",
+      "method": "hard_whitened_invariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.11466666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 3.558688531836023,
+          "shared_energy": 3.043638763986038,
+          "delta_energy": 1.0484676029179811,
+          "commutator_ratio": 0.05428702742939674
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 2.713853466980649e-28,
+          "shared_energy": 1.3141090490057302e-28,
+          "delta_energy": 2.130744389891982e-28,
+          "commutator_ratio": 0.0425674388008895
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 4.1259332198224044e-26,
+          "shared_energy": 1.6692640912141534e-26,
+          "delta_energy": 3.88717033506118e-26,
+          "commutator_ratio": 1.8213385179674395e-38
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05428702742939674
+    },
+    {
+      "suite": "mutual-10nn-graph-refresh",
+      "pair_mode": "graph_mutual_refresh",
+      "method": "shared_covariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.522,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 50.980410547569576,
+          "shared_energy": 38.38109005917029,
+          "delta_energy": 24.28516558670693,
+          "commutator_ratio": 0.05428702742939674
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 80.55588210868083,
+          "shared_energy": 38.22024250359354,
+          "delta_energy": 74.3903401044226,
+          "commutator_ratio": 0.028830087410699225
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.73033936613028,
+          "shared_energy": 21.57432170354118,
+          "delta_energy": 25.8868479181981,
+          "commutator_ratio": 0.014367741948158973
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05428702742939674
+    },
+    {
+      "suite": "mutual-10nn-graph-refresh",
+      "pair_mode": "graph_mutual_refresh",
+      "method": "auto_fisher",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.4776666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 49.10240710832328,
+          "shared_energy": 36.47178663445687,
+          "delta_energy": 24.225563191601957,
+          "commutator_ratio": 0.05428702742939674,
+          "floor": 0.034765409652458154
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 78.37847130454125,
+          "shared_energy": 30.433363096072924,
+          "delta_energy": 68.9204039001313,
+          "commutator_ratio": 0.03392897213525615,
+          "floor": 1.1385274357935633
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.22364926421656,
+          "shared_energy": 19.43323907862652,
+          "delta_energy": 26.359596832743062,
+          "commutator_ratio": 0.013599841599130292,
+          "floor": 0.8126614484075597
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05428702742939674
+    },
+    {
+      "suite": "affinity-10nn-mean-graph-refresh",
+      "pair_mode": "graph_affinity_mean_refresh",
+      "method": "pca",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.43866666666666665,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.46334116285898,
+          "shared_energy": 35.99398867709495,
+          "delta_energy": 12.77855222872571,
+          "commutator_ratio": 0.04921033976345685
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 83.18317680763889,
+          "shared_energy": 23.88252981544119,
+          "delta_energy": 56.20620240801855,
+          "commutator_ratio": 0.0373754891895938
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.01226754216731,
+          "shared_energy": 15.02369220238154,
+          "delta_energy": 15.846480674738071,
+          "commutator_ratio": 0.02665686369131387
+        }
+      ],
+      "first_layer_commutator_ratio": 0.04921033976345685
+    },
+    {
+      "suite": "affinity-10nn-mean-graph-refresh",
+      "pair_mode": "graph_affinity_mean_refresh",
+      "method": "pca_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.2926666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 34.37065846765621,
+          "shared_energy": 28.966492778804305,
+          "delta_energy": 3.8598484790976793,
+          "commutator_ratio": 0.04921033976345685
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 56.30425451237208,
+          "shared_energy": 29.854532087778587,
+          "delta_energy": 17.816608332295885,
+          "commutator_ratio": 0.061506422657536954
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 10.725748921422916,
+          "shared_energy": 7.003250322501209,
+          "delta_energy": 1.9970074185181304,
+          "commutator_ratio": 0.1361049946574331
+        }
+      ],
+      "first_layer_commutator_ratio": 0.04921033976345685
+    },
+    {
+      "suite": "affinity-10nn-mean-graph-refresh",
+      "pair_mode": "graph_affinity_mean_refresh",
+      "method": "logdet_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.27066666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 35.32805307859346,
+          "shared_energy": 29.60831632022578,
+          "delta_energy": 4.126054124712958,
+          "commutator_ratio": 0.04921033976345685
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 98.525540649043,
+          "shared_energy": 83.32875255458768,
+          "delta_energy": 6.261364771460762,
+          "commutator_ratio": 0.04427196638305246
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 8.654882746318279,
+          "shared_energy": 7.980760841628835,
+          "delta_energy": 0.21178773451830885,
+          "commutator_ratio": 0.049988429334080695
+        }
+      ],
+      "first_layer_commutator_ratio": 0.04921033976345685
+    },
+    {
+      "suite": "affinity-10nn-mean-graph-refresh",
+      "pair_mode": "graph_affinity_mean_refresh",
+      "method": "hard_whitened_invariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.11466666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 7.48377645459428,
+          "shared_energy": 5.9607688375054995,
+          "delta_energy": 1.1650937514863726,
+          "commutator_ratio": 0.04921033976345685
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 6.072357980144168e-28,
+          "shared_energy": 1.5404382557205622e-28,
+          "delta_energy": 4.758770771920964e-28,
+          "commutator_ratio": 0.0433059968194951
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 9.97741611112062e-26,
+          "shared_energy": 4.080570088125345e-26,
+          "delta_energy": 5.319070582013134e-26,
+          "commutator_ratio": 8.544337417592117e-38
+        }
+      ],
+      "first_layer_commutator_ratio": 0.04921033976345685
+    },
+    {
+      "suite": "affinity-10nn-mean-graph-refresh",
+      "pair_mode": "graph_affinity_mean_refresh",
+      "method": "shared_covariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.539,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.224420755444775,
+          "shared_energy": 36.03367243066805,
+          "delta_energy": 12.461111075974761,
+          "commutator_ratio": 0.04921033976345685
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 78.56389838377552,
+          "shared_energy": 26.416439364044205,
+          "delta_energy": 48.80917346955009,
+          "commutator_ratio": 0.04869224067191203
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.83843332578111,
+          "shared_energy": 18.02524525345447,
+          "delta_energy": 13.788393754502156,
+          "commutator_ratio": 0.028077493145749404
+        }
+      ],
+      "first_layer_commutator_ratio": 0.04921033976345685
+    },
+    {
+      "suite": "affinity-10nn-mean-graph-refresh",
+      "pair_mode": "graph_affinity_mean_refresh",
+      "method": "auto_fisher",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.4736666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 50.224564225806205,
+          "shared_energy": 35.08401642983396,
+          "delta_energy": 12.495707559834152,
+          "commutator_ratio": 0.04921033976345685,
+          "floor": 0.01765979002848493
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 75.99991081687615,
+          "shared_energy": 24.450163749522492,
+          "delta_energy": 44.73796656625741,
+          "commutator_ratio": 0.04289057564717459,
+          "floor": 0.7546086260801125
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 34.929719509542025,
+          "shared_energy": 15.940920361775941,
+          "delta_energy": 13.767369271386086,
+          "commutator_ratio": 0.015164381114310397,
+          "floor": 0.45113152532324097
+        }
+      ],
+      "first_layer_commutator_ratio": 0.04921033976345685
+    },
+    {
+      "suite": "sign-64-sketch-refresh",
+      "pair_mode": "sketch_refresh",
+      "method": "pca",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.449,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.45090299226696,
+          "shared_energy": 36.975403980912404,
+          "delta_energy": 14.471969790878145,
+          "commutator_ratio": 0.056665574206091786
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 81.76398718998624,
+          "shared_energy": 25.717863861619023,
+          "delta_energy": 56.0383709407006,
+          "commutator_ratio": 0.011268911519240104
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 35.82394200015527,
+          "shared_energy": 34.811906056761835,
+          "delta_energy": 0.5134192114434567,
+          "commutator_ratio": 0.042532106434784396
+        }
+      ],
+      "first_layer_commutator_ratio": 0.056665574206091786
+    },
+    {
+      "suite": "sign-64-sketch-refresh",
+      "pair_mode": "sketch_refresh",
+      "method": "pca_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.5056666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 34.26586045880018,
+          "shared_energy": 29.989522790942722,
+          "delta_energy": 4.274533343074877,
+          "commutator_ratio": 0.056665574206091786
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 60.78463556821301,
+          "shared_energy": 44.35586881900943,
+          "delta_energy": 16.416514426503827,
+          "commutator_ratio": 0.04587836371550017
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 21.106786170951413,
+          "shared_energy": 21.096368454845447,
+          "delta_energy": 1.471159516294202e-05,
+          "commutator_ratio": 0.09278693889926147
+        }
+      ],
+      "first_layer_commutator_ratio": 0.056665574206091786
+    },
+    {
+      "suite": "sign-64-sketch-refresh",
+      "pair_mode": "sketch_refresh",
+      "method": "logdet_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.626,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 35.26906388122903,
+          "shared_energy": 30.70247024812768,
+          "delta_energy": 4.564508509109242,
+          "commutator_ratio": 0.056665574206091786
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 83.4435938247718,
+          "shared_energy": 73.130377329742,
+          "delta_energy": 10.28977510163251,
+          "commutator_ratio": 0.0653009312050093
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 25.32960800083825,
+          "shared_energy": 25.31219734751581,
+          "delta_energy": 3.7812739613725845e-05,
+          "commutator_ratio": 0.07369978041440524
+        }
+      ],
+      "first_layer_commutator_ratio": 0.056665574206091786
+    },
+    {
+      "suite": "sign-64-sketch-refresh",
+      "pair_mode": "sketch_refresh",
+      "method": "hard_whitened_invariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.11466666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 15.976314950906795,
+          "shared_energy": 13.201666378392181,
+          "delta_energy": 2.7734349669839196,
+          "commutator_ratio": 0.056665574206091786
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 6.92616921610315e-28,
+          "shared_energy": 2.2987951386438543e-33,
+          "delta_energy": 6.926146217679915e-28,
+          "commutator_ratio": 0.025358432642128417
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 1.352945121923989e-24,
+          "shared_energy": 1.3478965379227985e-24,
+          "delta_energy": 1.2224704085041365e-27,
+          "commutator_ratio": 4.4606444458476655e-40
+        }
+      ],
+      "first_layer_commutator_ratio": 0.056665574206091786
+    },
+    {
+      "suite": "sign-64-sketch-refresh",
+      "pair_mode": "sketch_refresh",
+      "method": "shared_covariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.3873333333333333,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.24265735172323,
+          "shared_energy": 36.99226609278911,
+          "delta_energy": 14.246852218283735,
+          "commutator_ratio": 0.056665574206091786
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 86.4878640206577,
+          "shared_energy": 39.631224822164576,
+          "delta_energy": 46.844438965778146,
+          "commutator_ratio": 0.012032843299399226
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 35.918263856866474,
+          "shared_energy": 35.16905586733449,
+          "delta_energy": 0.303816756741663,
+          "commutator_ratio": 0.04534851308419461
+        }
+      ],
+      "first_layer_commutator_ratio": 0.056665574206091786
+    },
+    {
+      "suite": "sign-64-sketch-refresh",
+      "pair_mode": "sketch_refresh",
+      "method": "auto_fisher",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.45266666666666666,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 50.4550490326423,
+          "shared_energy": 36.18361454895535,
+          "delta_energy": 14.26795070570223,
+          "commutator_ratio": 0.056665574206091786,
+          "floor": 0.019774650818377995
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 78.82186983741335,
+          "shared_energy": 35.234954780647726,
+          "delta_energy": 43.57587703618889,
+          "commutator_ratio": 0.010873468052236572,
+          "floor": 0.7353047043872005
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 34.00486707818595,
+          "shared_energy": 33.74695111989524,
+          "delta_energy": 0.018619614069182062,
+          "commutator_ratio": 0.03706957105242443,
+          "floor": 0.016229250205651132
+        }
+      ],
+      "first_layer_commutator_ratio": 0.056665574206091786
+    },
+    {
+      "suite": "sparse-64-sketch-refresh",
+      "pair_mode": "sparse_sketch_refresh",
+      "method": "pca",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.4676666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.45090299226696,
+          "shared_energy": 36.68696062122007,
+          "delta_energy": 14.71701777537639,
+          "commutator_ratio": 0.05591494258745046
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 81.78695266821106,
+          "shared_energy": 25.51597794042367,
+          "delta_energy": 56.240188691170346,
+          "commutator_ratio": 0.011605117707343862
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 35.824167282477305,
+          "shared_energy": 34.73494779719287,
+          "delta_energy": 0.6387850471574197,
+          "commutator_ratio": 0.040458271310123674
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05591494258745046
+    },
+    {
+      "suite": "sparse-64-sketch-refresh",
+      "pair_mode": "sparse_sketch_refresh",
+      "method": "pca_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.5396666666666666,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 34.35912745211083,
+          "shared_energy": 29.893180468623566,
+          "delta_energy": 4.442209055032508,
+          "commutator_ratio": 0.05591494258745046
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 62.75632347738453,
+          "shared_energy": 45.661312329623826,
+          "delta_energy": 17.025751830451917,
+          "commutator_ratio": 0.04580216570671754
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 22.812099276454937,
+          "shared_energy": 22.80022239519468,
+          "delta_energy": 1.921295038175021e-05,
+          "commutator_ratio": 0.06961702374792375
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05591494258745046
+    },
+    {
+      "suite": "sparse-64-sketch-refresh",
+      "pair_mode": "sparse_sketch_refresh",
+      "method": "logdet_surplus",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.5576666666666666,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 34.71283402357516,
+          "shared_energy": 30.167618346652986,
+          "delta_energy": 4.518261594910908,
+          "commutator_ratio": 0.05591494258745046
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 89.51837319447472,
+          "shared_energy": 84.09907059227493,
+          "delta_energy": 5.328206629140341,
+          "commutator_ratio": 0.062371694571020736
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 19.158741647829622,
+          "shared_energy": 19.14992851906193,
+          "delta_energy": 9.833283973865221e-06,
+          "commutator_ratio": 0.10251456880156413
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05591494258745046
+    },
+    {
+      "suite": "sparse-64-sketch-refresh",
+      "pair_mode": "sparse_sketch_refresh",
+      "method": "hard_whitened_invariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.11466666666666667,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 15.478232686218211,
+          "shared_energy": 12.752568446251155,
+          "delta_energy": 2.7102047098951028,
+          "commutator_ratio": 0.05591494258745046
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 4.449647929206819e-28,
+          "shared_energy": 1.951476370758332e-33,
+          "delta_energy": 4.449628367537218e-28,
+          "commutator_ratio": 0.02665528468044642
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 9.665879543557593e-25,
+          "shared_energy": 9.631671953564655e-25,
+          "delta_energy": 6.347942929003157e-28,
+          "commutator_ratio": 1.6087494985866873e-40
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05591494258745046
+    },
+    {
+      "suite": "sparse-64-sketch-refresh",
+      "pair_mode": "sparse_sketch_refresh",
+      "method": "shared_covariance",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.364,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 51.22730281584405,
+          "shared_energy": 36.70448955761973,
+          "delta_energy": 14.475698772201827,
+          "commutator_ratio": 0.05591494258745046
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 86.80213332880672,
+          "shared_energy": 39.91943704002571,
+          "delta_energy": 46.833645599866585,
+          "commutator_ratio": 0.011822711642345768
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 36.011483528837026,
+          "shared_energy": 35.32411727797501,
+          "delta_energy": 0.30527332728799744,
+          "commutator_ratio": 0.03981413621779462
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05591494258745046
+    },
+    {
+      "suite": "sparse-64-sketch-refresh",
+      "pair_mode": "sparse_sketch_refresh",
+      "method": "auto_fisher",
+      "layer_dims": [
+        256,
+        64,
+        32
+      ],
+      "probe_accuracy": 0.43433333333333335,
+      "layers": [
+        {
+          "layer": 1,
+          "width": 256,
+          "retained_variance": 50.465451907852874,
+          "shared_energy": 35.90366659420815,
+          "delta_energy": 14.515435770458467,
+          "commutator_ratio": 0.05591494258745046,
+          "floor": 0.020085768461758306
+        },
+        {
+          "layer": 2,
+          "width": 64,
+          "retained_variance": 78.65985221573263,
+          "shared_energy": 35.25374638358499,
+          "delta_energy": 43.36196232585173,
+          "commutator_ratio": 0.010526460592415745,
+          "floor": 0.735303224305817
+        },
+        {
+          "layer": 3,
+          "width": 32,
+          "retained_variance": 34.06901148967552,
+          "shared_energy": 33.8142524897692,
+          "delta_energy": 0.017951423906562385,
+          "commutator_ratio": 0.041960161650491164,
+          "floor": 0.018738684844902757
+        }
+      ],
+      "first_layer_commutator_ratio": 0.05591494258745046
+    }
+  ],
+  "residual": [
+    {
+      "suite": "sign-64-sketch-residual",
+      "pair_name": "sign-64-sketch",
+      "method": "pca",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.8523333333333334,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 49.20900703093294,
+          "shared_energy": 36.80436586676262,
+          "delta_energy": 12.40119202169084,
+          "commutator_ratio": 0.056665574206091786
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 565.7667154032301,
+          "shared_energy": 306.44764266878434,
+          "delta_energy": 259.2930512554233,
+          "commutator_ratio": 0.040854093525731765
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 613.1997546505186,
+          "shared_energy": 357.2025689969165,
+          "delta_energy": 255.9619554754346,
+          "commutator_ratio": 0.0436571602917776
+        }
+      ],
+      "final_commutator_ratio": 0.045750235407239465
+    },
+    {
+      "suite": "sign-64-sketch-residual",
+      "pair_name": "sign-64-sketch",
+      "method": "pca_surplus",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.8303333333333334,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 34.25571869832735,
+          "shared_energy": 29.98951571447611,
+          "delta_energy": 4.264398662700398,
+          "commutator_ratio": 0.056665574206091786
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 350.2861604440767,
+          "shared_energy": 260.6048925350078,
+          "delta_energy": 89.66621270331993,
+          "commutator_ratio": 0.046743127339104296
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 441.39817884804245,
+          "shared_energy": 363.48217015438024,
+          "delta_energy": 77.89415525820937,
+          "commutator_ratio": 0.052368211661021104
+        }
+      ],
+      "final_commutator_ratio": 0.05791139558268042
+    },
+    {
+      "suite": "sign-64-sketch-residual",
+      "pair_name": "sign-64-sketch",
+      "method": "logdet_surplus",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.853,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 33.74732527499099,
+          "shared_energy": 29.645411553701287,
+          "delta_energy": 4.099987990975253,
+          "commutator_ratio": 0.056665574206091786
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 355.17986166590737,
+          "shared_energy": 281.2146126812495,
+          "delta_energy": 73.94922097895049,
+          "commutator_ratio": 0.04506743665893674
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 437.1962646412148,
+          "shared_energy": 377.3979524218439,
+          "delta_energy": 59.77758964900755,
+          "commutator_ratio": 0.04714689235064878
+        }
+      ],
+      "final_commutator_ratio": 0.052906373782219615
+    },
+    {
+      "suite": "sign-64-sketch-residual",
+      "pair_name": "sign-64-sketch",
+      "method": "hard_whitened_invariance",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.11466666666666667,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 1.573708377049044e-05,
+          "shared_energy": 5.203786687261741e-10,
+          "delta_energy": 1.5736563274417e-05,
+          "commutator_ratio": 0.056665574206091786
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 84.18318935737922,
+          "shared_energy": 63.42175787427432,
+          "delta_energy": 20.757637481081915,
+          "commutator_ratio": 0.03811201202294327
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 136.1867683722341,
+          "shared_energy": 115.1161614763488,
+          "delta_energy": 21.06560443401505,
+          "commutator_ratio": 0.04710135722205979
+        }
+      ],
+      "final_commutator_ratio": 0.05681632102491636
+    },
+    {
+      "suite": "sign-64-sketch-residual",
+      "pair_name": "sign-64-sketch",
+      "method": "shared_covariance",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.8513333333333334,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 48.965473688868485,
+          "shared_energy": 36.86733043143559,
+          "delta_energy": 12.094658113184746,
+          "commutator_ratio": 0.056665574206091786
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 556.9608612764061,
+          "shared_energy": 310.04606128594605,
+          "delta_energy": 246.8884793154506,
+          "commutator_ratio": 0.040929195049679915
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 608.8113211842758,
+          "shared_energy": 362.0462940958996,
+          "delta_energy": 246.7310363412556,
+          "commutator_ratio": 0.043905861034839344
+        }
+      ],
+      "final_commutator_ratio": 0.04613455503207106
+    },
+    {
+      "suite": "sign-64-sketch-residual",
+      "pair_name": "sign-64-sketch",
+      "method": "auto_fisher",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.8593333333333333,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 45.273945795861245,
+          "shared_energy": 33.83594844236531,
+          "delta_energy": 11.43471659050972,
+          "commutator_ratio": 0.056665574206091786
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 527.3319845199217,
+          "shared_energy": 304.6738482386815,
+          "delta_energy": 222.6339542102417,
+          "commutator_ratio": 0.03962523098844988
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 576.2240389441562,
+          "shared_energy": 349.72971038923504,
+          "delta_energy": 226.4650051919951,
+          "commutator_ratio": 0.04083149402178942
+        }
+      ],
+      "final_commutator_ratio": 0.04273590663984606
+    },
+    {
+      "suite": "sparse-64-sketch-residual",
+      "pair_name": "sparse-64-sketch",
+      "method": "pca",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.8523333333333334,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 49.20900703093294,
+          "shared_energy": 36.518205982935626,
+          "delta_energy": 12.645019594980125,
+          "commutator_ratio": 0.05591494258745046
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 565.7667154032301,
+          "shared_energy": 307.9909304403974,
+          "delta_energy": 257.45054835897133,
+          "commutator_ratio": 0.04052745280187438
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 613.1997546505186,
+          "shared_energy": 357.979698486086,
+          "delta_energy": 254.78458898713933,
+          "commutator_ratio": 0.04263014805182227
+        }
+      ],
+      "final_commutator_ratio": 0.044134377236325024
+    },
+    {
+      "suite": "sparse-64-sketch-residual",
+      "pair_name": "sparse-64-sketch",
+      "method": "pca_surplus",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.8153333333333334,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 33.74819172844106,
+          "shared_energy": 29.475339599611495,
+          "delta_energy": 4.249918703234974,
+          "commutator_ratio": 0.05591494258745046
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 334.0660009372806,
+          "shared_energy": 255.74713170754205,
+          "delta_energy": 78.13911104097988,
+          "commutator_ratio": 0.045335707469521466
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 422.71385022900523,
+          "shared_energy": 355.1913274721525,
+          "delta_energy": 67.268547693376,
+          "commutator_ratio": 0.049878853205847305
+        }
+      ],
+      "final_commutator_ratio": 0.054701715450781625
+    },
+    {
+      "suite": "sparse-64-sketch-residual",
+      "pair_name": "sparse-64-sketch",
+      "method": "logdet_surplus",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.8513333333333334,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 32.936720701048955,
+          "shared_energy": 28.916213848400762,
+          "delta_energy": 3.995989310300458,
+          "commutator_ratio": 0.05591494258745046
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 349.8329068954132,
+          "shared_energy": 282.6024558701281,
+          "delta_energy": 67.03215359782672,
+          "commutator_ratio": 0.04431682574722299
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 429.6455527501038,
+          "shared_energy": 375.2530310434894,
+          "delta_energy": 54.14064383608014,
+          "commutator_ratio": 0.04718869308240802
+        }
+      ],
+      "final_commutator_ratio": 0.0526910552949863
+    },
+    {
+      "suite": "sparse-64-sketch-residual",
+      "pair_name": "sparse-64-sketch",
+      "method": "hard_whitened_invariance",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.11466666666666667,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 1.5737216737404078e-05,
+          "shared_energy": 6.827551503269364e-10,
+          "delta_energy": 1.573653134989978e-05,
+          "commutator_ratio": 0.05591494258745046
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 83.71387248084451,
+          "shared_energy": 63.41519165614508,
+          "delta_energy": 20.2509675284227,
+          "commutator_ratio": 0.037738856216906036
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 130.75508086459467,
+          "shared_energy": 111.01427746078078,
+          "delta_energy": 19.679749536831558,
+          "commutator_ratio": 0.04653946134632239
+        }
+      ],
+      "final_commutator_ratio": 0.05378576775588943
+    },
+    {
+      "suite": "sparse-64-sketch-residual",
+      "pair_name": "sparse-64-sketch",
+      "method": "shared_covariance",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.8446666666666667,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 48.966584317979155,
+          "shared_energy": 36.57953027567453,
+          "delta_energy": 12.3407856497804,
+          "commutator_ratio": 0.05591494258745046
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 558.2142208788632,
+          "shared_energy": 312.6993402869444,
+          "delta_energy": 245.18414404105255,
+          "commutator_ratio": 0.040606970361762744
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 609.2310565188134,
+          "shared_energy": 363.8529437284536,
+          "delta_energy": 244.953493044412,
+          "commutator_ratio": 0.04286759036061429
+        }
+      ],
+      "final_commutator_ratio": 0.04450015474045817
+    },
+    {
+      "suite": "sparse-64-sketch-residual",
+      "pair_name": "sparse-64-sketch",
+      "method": "auto_fisher",
+      "branch_rank": 128,
+      "depth": 3,
+      "final_dim": 32,
+      "probe_accuracy": 0.8483333333333334,
+      "blocks": [
+        {
+          "block": 1,
+          "branch_rank": 128,
+          "retained_variance": 45.35768064730855,
+          "shared_energy": 33.623011981579054,
+          "delta_energy": 11.691045215565403,
+          "commutator_ratio": 0.05591494258745046
+        },
+        {
+          "block": 2,
+          "branch_rank": 128,
+          "retained_variance": 528.821664544631,
+          "shared_energy": 307.8225021628279,
+          "delta_energy": 220.6920923595148,
+          "commutator_ratio": 0.04023629832483467
+        },
+        {
+          "block": 3,
+          "branch_rank": 128,
+          "retained_variance": 575.9785798450243,
+          "shared_energy": 350.6421294225746,
+          "delta_energy": 224.9652606207703,
+          "commutator_ratio": 0.04069497984311718
+        }
+      ],
+      "final_commutator_ratio": 0.041788728388564435
+    }
+  ]
+}

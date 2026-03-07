@@ -1,0 +1,99 @@
+{
+  "config": {
+    "pair_name": "same-class-random-pair",
+    "seed": 7,
+    "n_train": 12000,
+    "n_test": 3000,
+    "d": 32,
+    "methods": [
+      "pca",
+      "pca_surplus",
+      "logdet_surplus",
+      "hard_whitened_invariance",
+      "shared_covariance",
+      "auto_fisher"
+    ],
+    "supervised_positive_pairs": true
+  },
+  "rows": [
+    {
+      "pair_name": "same-class-random-pair",
+      "method": "auto_fisher",
+      "d": 32,
+      "delta_trace_ratio": 1.596178143239526,
+      "commutator_ratio": 0.07103769196291942,
+      "supervised_positive_pairs": true,
+      "probe_accuracy": 0.9153333333333333,
+      "retained_variance": 25.616828524859557,
+      "retained_vs_pca": 0.6556664067561557,
+      "shared_energy": 7.2547691988920455,
+      "delta_energy": 36.254054246838535,
+      "floor": 0.10690031468936347
+    },
+    {
+      "pair_name": "same-class-random-pair",
+      "method": "logdet_surplus",
+      "d": 32,
+      "delta_trace_ratio": 1.596178143239526,
+      "commutator_ratio": 0.07103769196291942,
+      "supervised_positive_pairs": true,
+      "probe_accuracy": 0.9073333333333333,
+      "retained_variance": 12.127612193008098,
+      "retained_vs_pca": 0.3104079765926198,
+      "shared_energy": 6.961585869945215,
+      "delta_energy": 10.13727091632496
+    },
+    {
+      "pair_name": "same-class-random-pair",
+      "method": "pca",
+      "d": 32,
+      "delta_trace_ratio": 1.596178143239526,
+      "commutator_ratio": 0.07103769196291942,
+      "supervised_positive_pairs": true,
+      "probe_accuracy": 0.906,
+      "retained_variance": 39.06991156005119,
+      "retained_vs_pca": 0.9999999999999998,
+      "shared_energy": 10.528850980474342,
+      "delta_energy": 57.09477918839858
+    },
+    {
+      "pair_name": "same-class-random-pair",
+      "method": "shared_covariance",
+      "d": 32,
+      "delta_trace_ratio": 1.596178143239526,
+      "commutator_ratio": 0.07103769196291942,
+      "supervised_positive_pairs": true,
+      "probe_accuracy": 0.8976666666666666,
+      "retained_variance": 28.99888719790904,
+      "retained_vs_pca": 0.74223068443186,
+      "shared_energy": 11.330982890290418,
+      "delta_energy": 35.38967259751755
+    },
+    {
+      "pair_name": "same-class-random-pair",
+      "method": "pca_surplus",
+      "d": 32,
+      "delta_trace_ratio": 1.596178143239526,
+      "commutator_ratio": 0.07103769196291942,
+      "supervised_positive_pairs": true,
+      "probe_accuracy": 0.7426666666666667,
+      "retained_variance": 18.203956714000565,
+      "retained_vs_pca": 0.4659328876652495,
+      "shared_energy": 8.779336256785923,
+      "delta_energy": 18.87625755273852
+    },
+    {
+      "pair_name": "same-class-random-pair",
+      "method": "hard_whitened_invariance",
+      "d": 32,
+      "delta_trace_ratio": 1.596178143239526,
+      "commutator_ratio": 0.07103769196291942,
+      "supervised_positive_pairs": true,
+      "probe_accuracy": 0.11466666666666667,
+      "retained_variance": 4.8026226084538857e-20,
+      "retained_vs_pca": 1.2292381571102774e-21,
+      "shared_energy": 2.773717561503612e-23,
+      "delta_energy": -2.5213874348628874e-21
+    }
+  ]
+}
