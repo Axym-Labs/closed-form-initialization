@@ -1,0 +1,44 @@
+{
+  "dataset": "cifar100",
+  "suite": "single-translation",
+  "lambda": 0.3,
+  "depth": 3,
+  "final_dim": 32,
+  "n_train": 6000,
+  "n_test": 1000,
+  "full_probe_accuracy": 0.08,
+  "final_pca_probe_accuracy": 0.085,
+  "raw_input_pca_probe_accuracy": 0.126,
+  "layers": [
+    {
+      "layer": 1,
+      "distance_to_identity": 140.70484939856266,
+      "distance_to_whitened_identity": 31.54668165059134,
+      "total_delta_trace": 83.244618610203,
+      "post_delta_trace": 1426.3067244404829,
+      "post_shared_trace": 2238.4812910826877,
+      "base_trace": 3306.002148186849,
+      "max_whitened_delta": 3.739447101121153
+    },
+    {
+      "layer": 2,
+      "distance_to_identity": 131.31826036142627,
+      "distance_to_whitened_identity": 36.710451409122996,
+      "total_delta_trace": 1426.3067244404829,
+      "post_delta_trace": 1842.7010020438588,
+      "post_shared_trace": 2010.6019699488797,
+      "base_trace": 3342.1887677028794,
+      "max_whitened_delta": 3.64959183771764
+    },
+    {
+      "layer": 3,
+      "distance_to_identity": 253.86881653774552,
+      "distance_to_whitened_identity": 36.836000176121054,
+      "total_delta_trace": 1842.7010020438588,
+      "post_delta_trace": 2370.9062626361297,
+      "post_shared_trace": 1733.0566476084355,
+      "base_trace": 3368.1064624170945,
+      "max_whitened_delta": 3.6980386508197367
+    }
+  ]
+}

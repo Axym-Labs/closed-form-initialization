@@ -10,7 +10,6 @@ from torchvision import datasets
 from torchvision.transforms import ToTensor
 
 from project_paths import resolve_json_path
-import mnist_linear_augmentation_suites as aug_suites
 
 
 SEED = 7
@@ -22,6 +21,7 @@ PROBE_MAX_ITER = 2000
 REG_EPS = 1e-4
 
 LAMBDA_REG = 1.0
+LEAKY_RELU_SLOPE = 0.1
 
 
 def covariance(X):
@@ -74,6 +74,8 @@ def fit_linear_probe(ztr, ytr, zte, yte):
 
 
 def sample_pair_views(X, suite_name, seed):
+    import mnist_linear_augmentation_suites as aug_suites
+
     rng = np.random.default_rng(seed)
     p = X.shape[1]
     mats = [np.eye(p, dtype=np.float64)] + aug_suites.build_augmentation_suite(
@@ -147,6 +149,24 @@ def fit_whitened_cov_layer(stats, lambda_reg):
     }
 
 
+def fit_whitened_shared_pca_layer(stats):
+    sigma_bar = stats["sigma_bar"]
+    shared = stats["shared"]
+    _, sigma_inv_sqrt = sqrt_and_inv_sqrt_psd(sigma_bar, REG_EPS)
+    s_matrix = sigma_inv_sqrt @ shared @ sigma_inv_sqrt
+    s_matrix = 0.5 * (s_matrix + s_matrix.T)
+
+    eigvals_s, eigvecs_s = eigh(s_matrix)
+    transform = eigvecs_s.T @ sigma_inv_sqrt
+    return {
+        "transform": transform,
+        "s_matrix": s_matrix,
+        "shared_eigenvalues": eigvals_s,
+        "max_shared_eigenvalue": float(np.max(eigvals_s)),
+        "min_shared_eigenvalue": float(np.min(eigvals_s)),
+    }
+
+
 def fit_layer(H1, H2, lambda_reg):
     stats = compute_paired_stats(H1, H2)
     model = fit_whitened_cov_layer(
@@ -166,8 +186,37 @@ def fit_layer(H1, H2, lambda_reg):
     }
 
 
-def apply_layer(X, transform):
-    return np.maximum(X @ transform, 0.0)
+def fit_whitened_shared_pca_from_pairs(H1, H2):
+    stats = compute_paired_stats(H1, H2)
+    model = fit_whitened_shared_pca_layer(stats)
+    return {
+        "transform": model["transform"],
+        "stats": stats,
+        "transform_fro": float(np.linalg.norm(model["transform"], ord="fro")),
+        "distance_to_identity": float(np.linalg.norm(model["transform"] - np.eye(model["transform"].shape[0]), ord="fro")),
+        "distance_to_whitened_identity": float("nan"),
+        "total_delta_trace": float(np.trace(stats["delta"])),
+        "min_whitened_delta": float("nan"),
+        "max_whitened_delta": float("nan"),
+        "max_shared_eigenvalue": model["max_shared_eigenvalue"],
+        "min_shared_eigenvalue": model["min_shared_eigenvalue"],
+    }
+
+
+def apply_activation(X, activation):
+    if activation == "relu":
+        return np.maximum(X, 0.0)
+    if activation == "tanh":
+        return np.tanh(X)
+    if activation == "leaky-relu":
+        return np.where(X >= 0.0, X, LEAKY_RELU_SLOPE * X)
+    if activation == "identity":
+        return X
+    raise ValueError(f"Unknown activation: {activation}")
+
+
+def apply_layer(X, transform, activation="relu"):
+    return apply_activation(X @ transform, activation)
 
 
 def normalize_hidden(train_arrays, test_arrays):
@@ -188,7 +237,7 @@ def top_pca_projection(Xtr, d):
     return evecs[:, -d:]
 
 
-def run_experiment(suite_name, depth, final_dim, lambda_reg):
+def run_experiment(suite_name, depth, final_dim, lambda_reg, activation="relu"):
     xtr, ytr, xte, yte = load_mnist_numpy()
     base_tr = xtr.copy()
     base_te = xte.copy()
@@ -204,12 +253,12 @@ def run_experiment(suite_name, depth, final_dim, lambda_reg):
         )
         transform = model["transform"]
 
-        base_tr = apply_layer(base_tr, transform)
-        base_te = apply_layer(base_te, transform)
-        view1_tr = apply_layer(view1_tr, transform)
-        view2_tr = apply_layer(view2_tr, transform)
-        view1_te = apply_layer(view1_te, transform)
-        view2_te = apply_layer(view2_te, transform)
+        base_tr = apply_layer(base_tr, transform, activation=activation)
+        base_te = apply_layer(base_te, transform, activation=activation)
+        view1_tr = apply_layer(view1_tr, transform, activation=activation)
+        view2_tr = apply_layer(view2_tr, transform, activation=activation)
+        view1_te = apply_layer(view1_te, transform, activation=activation)
+        view2_te = apply_layer(view2_te, transform, activation=activation)
 
         train_arrays, test_arrays = normalize_hidden(
             [base_tr, view1_tr, view2_tr],
@@ -253,6 +302,7 @@ def run_experiment(suite_name, depth, final_dim, lambda_reg):
         "depth": depth,
         "final_dim": final_dim,
         "lambda": lambda_reg,
+        "activation": activation,
         "full_probe_accuracy": acc_full,
         "final_pca_probe_accuracy": acc_pca32,
         "raw_input_pca_probe_accuracy": acc_raw_pca32,
@@ -275,6 +325,7 @@ def main():
     parser.add_argument("--depth", type=int, default=DEPTH)
     parser.add_argument("--final-d", type=int, default=FINAL_D)
     parser.add_argument("--lambda", dest="lambda_reg", type=float, default=LAMBDA_REG)
+    parser.add_argument("--activation", choices=["relu", "tanh", "leaky-relu", "identity"], default="relu")
     parser.add_argument("--save-json", type=Path, default=None)
     args = parser.parse_args()
 
@@ -286,10 +337,11 @@ def main():
         depth=args.depth,
         final_dim=args.final_d,
         lambda_reg=args.lambda_reg,
+        activation=args.activation,
     )
 
     print(
-        f"Closed-form Barlow Twins  |  suite={result['suite']}  |  depth={result['depth']}  |  final_d={result['final_dim']}"
+        f"Closed-form Barlow Twins  |  suite={result['suite']}  |  depth={result['depth']}  |  activation={result['activation']}  |  final_d={result['final_dim']}"
     )
     print(f"full probe accuracy      : {result['full_probe_accuracy']:.4f}")
     print(f"final PCA-{result['final_dim']} probe : {result['final_pca_probe_accuracy']:.4f}")

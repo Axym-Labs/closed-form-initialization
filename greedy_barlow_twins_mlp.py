@@ -12,7 +12,6 @@ from torchvision import datasets
 from torchvision.transforms import ToTensor
 
 from project_paths import resolve_json_path
-import mnist_linear_augmentation_suites as aug_suites
 
 
 SEED = 7
@@ -26,6 +25,7 @@ MOMENTUM = 0.9
 WEIGHT_DECAY = 1e-4
 LAMBDA_OFFDIAG = 5e-3
 PROBE_MAX_ITER = 2000
+LEAKY_RELU_SLOPE = 0.1
 
 
 def set_seed(seed):
@@ -57,6 +57,8 @@ def load_mnist_numpy():
 
 
 def sample_pair_views(X, suite_name, seed):
+    import mnist_linear_augmentation_suites as aug_suites
+
     rng = np.random.default_rng(seed)
     p = X.shape[1]
     mats = [np.eye(p, dtype=np.float32)] + aug_suites.build_augmentation_suite(
@@ -114,10 +116,23 @@ def barlow_twins_loss(z1, z2, lambda_offdiag):
     return on_diag + lambda_offdiag * off
 
 
+def apply_activation_torch(x, activation):
+    if activation == "relu":
+        return torch.relu(x)
+    if activation == "tanh":
+        return torch.tanh(x)
+    if activation == "leaky-relu":
+        return torch.where(x >= 0.0, x, LEAKY_RELU_SLOPE * x)
+    if activation == "identity":
+        return x
+    raise ValueError(f"Unknown activation: {activation}")
+
+
 class GreedyBarlowMLP(nn.Module):
-    def __init__(self, input_dim, widths):
+    def __init__(self, input_dim, widths, activation):
         super().__init__()
         dims = [input_dim] + list(widths)
+        self.activation = activation
         self.layers = nn.ModuleList(
             [nn.Linear(dims[i], dims[i + 1], bias=False) for i in range(len(widths))]
         )
@@ -125,13 +140,13 @@ class GreedyBarlowMLP(nn.Module):
     def forward_to_layer_input(self, x, layer_idx):
         h = x
         for idx in range(layer_idx):
-            h = torch.relu(self.layers[idx](h))
+            h = apply_activation_torch(self.layers[idx](h), self.activation)
         return h
 
     def extract_features(self, x):
         h = x
         for layer in self.layers:
-            h = torch.relu(layer(h))
+            h = apply_activation_torch(layer(h), self.activation)
         return h
 
 
@@ -163,7 +178,8 @@ def train_layer_greedy(model, layer_idx, loader, device, loss_position, epochs, 
             if loss_position == "pre":
                 z1, z2 = pre1, pre2
             else:
-                z1, z2 = torch.relu(pre1), torch.relu(pre2)
+                z1 = apply_activation_torch(pre1, model.activation)
+                z2 = apply_activation_torch(pre2, model.activation)
 
             loss = barlow_twins_loss(z1, z2, lambda_offdiag=lambda_offdiag)
             optimizer.zero_grad()
@@ -204,6 +220,7 @@ def run_variant(
     momentum,
     weight_decay,
     lambda_offdiag,
+    activation,
 ):
     set_seed(SEED)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -216,7 +233,7 @@ def run_variant(
     train_ds = TensorDataset(torch.from_numpy(x1tr), torch.from_numpy(x2tr))
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True)
 
-    model = GreedyBarlowMLP(xtr.shape[1], widths).to(device)
+    model = GreedyBarlowMLP(xtr.shape[1], widths, activation=activation).to(device)
     layer_stats = []
     for layer_idx in range(len(widths)):
         losses = train_layer_greedy(
@@ -249,6 +266,7 @@ def run_variant(
         "suite": suite_name,
         "pair_source": pair_source,
         "loss_position": loss_position,
+        "activation": activation,
         "widths": widths,
         "probe_accuracy": probe_acc,
         "layers": layer_stats,
@@ -274,28 +292,33 @@ def main():
     parser.add_argument("--momentum", type=float, default=MOMENTUM)
     parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY)
     parser.add_argument("--lambda-offdiag", type=float, default=LAMBDA_OFFDIAG)
+    parser.add_argument("--activation", choices=["relu", "tanh", "leaky-relu", "identity"], default="relu")
+    parser.add_argument("--widths", nargs="+", type=int, default=WIDTHS)
+    parser.add_argument("--loss-position", choices=["pre", "post", "both"], default="both")
     parser.add_argument("--save-json", type=Path, default=None)
     args = parser.parse_args()
 
     results = []
-    for loss_position in ["pre", "post"]:
+    loss_positions = ["pre", "post"] if args.loss_position == "both" else [args.loss_position]
+    for loss_position in loss_positions:
         results.append(
             run_variant(
                 suite_name=args.suite,
                 pair_source=args.pair_source,
                 loss_position=loss_position,
-                widths=WIDTHS,
+                widths=args.widths,
                 batch_size=args.batch_size,
                 epochs=args.epochs,
                 lr=args.lr,
                 momentum=args.momentum,
                 weight_decay=args.weight_decay,
                 lambda_offdiag=args.lambda_offdiag,
+                activation=args.activation,
             )
         )
 
     print(
-        f"Greedy Barlow Twins MLP  |  suite={args.suite}  |  pair_source={args.pair_source}  |  widths={WIDTHS}"
+        f"Greedy Barlow Twins MLP  |  suite={args.suite}  |  pair_source={args.pair_source}  |  activation={args.activation}  |  widths={args.widths}"
     )
     for result in results:
         print(f"{result['loss_position']:>4s} activation loss | probe accuracy = {result['probe_accuracy']:.4f}")

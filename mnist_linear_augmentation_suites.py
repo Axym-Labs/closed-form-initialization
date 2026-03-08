@@ -25,13 +25,17 @@
 
 import argparse
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy.linalg import eigh, svd
 from inspect import signature
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from torchvision import datasets
 from torchvision.transforms import ToTensor
+
+try:
+    import matplotlib.pyplot as plt
+except Exception:
+    plt = None
 
 
 # ============================================================
@@ -75,19 +79,20 @@ rng = np.random.default_rng(SEED)
 # ============================================================
 # plotting style
 # ============================================================
-plt.rcParams.update({
-    "font.family": "serif",
-    "font.size": 9,
-    "axes.grid": True,
-    "grid.alpha": 0.28,
-    "grid.linestyle": "--",
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "figure.dpi": 150,
-    "axes.titlesize": 10,
-    "axes.labelsize": 9,
-    "legend.fontsize": 8,
-})
+if plt is not None:
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.size": 9,
+        "axes.grid": True,
+        "grid.alpha": 0.28,
+        "grid.linestyle": "--",
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "figure.dpi": 150,
+        "axes.titlesize": 10,
+        "axes.labelsize": 9,
+        "legend.fontsize": 8,
+    })
 
 
 # ============================================================
