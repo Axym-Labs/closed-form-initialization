@@ -21,7 +21,15 @@ PROBE_MAX_ITER = 2000
 SINGLE_TRANSLATION_DX = 3
 SINGLE_TRANSLATION_DY = 3
 BLOCK_GRID_SPLITS = 3
-LAYER_METHODS = ["closed-form-barlow", "whitened-shared-pca"]
+LAYER_METHODS = [
+    "closed-form-barlow",
+    "iterref-old",
+    "iterref-symcca",
+    "residual-barlow",
+    "whitened-shared-pca",
+    "paper-cca",
+    "paper-cca-shared",
+]
 ACTIVATIONS = ["relu", "tanh", "leaky-relu", "identity"]
 
 
@@ -157,8 +165,18 @@ def fit_linear_probe(ztr, ytr, zte, yte):
 def fit_layer_by_method(method_name, view1_tr, view2_tr, lambda_reg):
     if method_name == "closed-form-barlow":
         return cfbt.fit_layer(view1_tr, view2_tr, lambda_reg=lambda_reg)
+    if method_name == "iterref-old":
+        return cfbt.fit_iterref_old_from_pairs(view1_tr, view2_tr, lambda_reg=lambda_reg)
+    if method_name == "iterref-symcca":
+        return cfbt.fit_residual_barlow_from_pairs(view1_tr, view2_tr, lambda_reg=lambda_reg)
+    if method_name == "residual-barlow":
+        return cfbt.fit_residual_barlow_from_pairs(view1_tr, view2_tr, lambda_reg=lambda_reg)
     if method_name == "whitened-shared-pca":
         return cfbt.fit_whitened_shared_pca_from_pairs(view1_tr, view2_tr)
+    if method_name == "paper-cca":
+        return cfbt.fit_paper_cca_from_pairs(view1_tr, view2_tr)
+    if method_name == "paper-cca-shared":
+        return cfbt.fit_paper_cca_shared_from_pairs(view1_tr, view2_tr)
     raise ValueError(f"Unknown layer method: {method_name}")
 
 
@@ -175,14 +193,16 @@ def run_experiment(dataset_name, suite_name, lambda_reg, depth, final_dim, n_tra
     layers = []
     for layer_idx in range(depth):
         model = fit_layer_by_method(layer_method, view1_tr, view2_tr, lambda_reg=lambda_reg)
-        transform = model["transform"]
+        transform_base = model["transform_base"]
+        transform_view1 = model["transform_view1"]
+        transform_view2 = model["transform_view2"]
 
-        base_tr = cfbt.apply_layer(base_tr, transform, activation=activation)
-        base_te = cfbt.apply_layer(base_te, transform, activation=activation)
-        view1_tr = cfbt.apply_layer(view1_tr, transform, activation=activation)
-        view2_tr = cfbt.apply_layer(view2_tr, transform, activation=activation)
-        view1_te = cfbt.apply_layer(view1_te, transform, activation=activation)
-        view2_te = cfbt.apply_layer(view2_te, transform, activation=activation)
+        base_tr = cfbt.apply_layer(base_tr, transform_base, activation=activation)
+        base_te = cfbt.apply_layer(base_te, transform_base, activation=activation)
+        view1_tr = cfbt.apply_layer(view1_tr, transform_view1, activation=activation)
+        view2_tr = cfbt.apply_layer(view2_tr, transform_view2, activation=activation)
+        view1_te = cfbt.apply_layer(view1_te, transform_view1, activation=activation)
+        view2_te = cfbt.apply_layer(view2_te, transform_view2, activation=activation)
 
         train_arrays, test_arrays = cfbt.normalize_hidden(
             [base_tr, view1_tr, view2_tr],
@@ -204,6 +224,10 @@ def run_experiment(dataset_name, suite_name, lambda_reg, depth, final_dim, n_tra
                 "max_whitened_delta": model["max_whitened_delta"],
                 "max_shared_eigenvalue": model.get("max_shared_eigenvalue"),
                 "min_shared_eigenvalue": model.get("min_shared_eigenvalue"),
+                "max_residual_gain": model.get("max_residual_gain"),
+                "min_residual_gain": model.get("min_residual_gain"),
+                "max_canonical_correlation": model.get("max_canonical_correlation"),
+                "min_canonical_correlation": model.get("min_canonical_correlation"),
             }
         )
 

@@ -1,0 +1,32 @@
+{
+  "dataset": "cifar10",
+  "suite": "block-masking",
+  "layer_method": "iterref-old",
+  "activation": "relu",
+  "lambda": 1.0,
+  "depth": 1,
+  "final_dim": 32,
+  "n_train": 6000,
+  "n_test": 1000,
+  "full_probe_accuracy": 0.406,
+  "final_pca_probe_accuracy": 0.35,
+  "raw_input_pca_probe_accuracy": 0.375,
+  "layers": [
+    {
+      "layer": 1,
+      "distance_to_identity": 60.025053921629585,
+      "distance_to_whitened_identity": 9.729260231287675,
+      "total_delta_trace": 34.40061108468244,
+      "post_delta_trace": 934.6636325901314,
+      "post_shared_trace": 2532.948910794091,
+      "base_trace": 3214.4108871941453,
+      "max_whitened_delta": 2.7812331248954596,
+      "max_shared_eigenvalue": null,
+      "min_shared_eigenvalue": null,
+      "max_residual_gain": 0.9999992471692415,
+      "min_residual_gain": 0.5156538467228206,
+      "max_canonical_correlation": null,
+      "min_canonical_correlation": null
+    }
+  ]
+}

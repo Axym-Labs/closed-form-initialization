@@ -1,0 +1,59 @@
+{
+  "suite": "block-masking",
+  "depth": 3,
+  "final_dim": 32,
+  "lambda": 1.0,
+  "activation": "relu",
+  "layer_method": "iterref-old",
+  "full_probe_accuracy": 0.95,
+  "final_pca_probe_accuracy": 0.9046666666666666,
+  "raw_input_pca_probe_accuracy": 0.906,
+  "layers": [
+    {
+      "layer": 1,
+      "transform_fro": 27.61282745806277,
+      "distance_to_identity": 10.592705227010173,
+      "distance_to_whitened_identity": 3.9418841766643666,
+      "total_delta_trace": 9.478245080465364,
+      "post_delta_trace": 164.54590121225885,
+      "post_shared_trace": 577.4443948033625,
+      "base_trace": 723.2809580294982,
+      "max_whitened_delta": 1.7312946886299907,
+      "max_shared_eigenvalue": null,
+      "min_shared_eigenvalue": null,
+      "max_residual_gain": 1.0,
+      "min_residual_gain": 0.5384925539982548
+    },
+    {
+      "layer": 2,
+      "transform_fro": 24.763754041869618,
+      "distance_to_identity": 9.722325946986537,
+      "distance_to_whitened_identity": 6.207590384349619,
+      "total_delta_trace": 164.54590121225885,
+      "post_delta_trace": 157.0694089739135,
+      "post_shared_trace": 575.1470530831075,
+      "base_trace": 735.2347972139102,
+      "max_whitened_delta": 2.0337495746554057,
+      "max_shared_eigenvalue": null,
+      "min_shared_eigenvalue": null,
+      "max_residual_gain": 1.0,
+      "min_residual_gain": 0.5284988796580357
+    },
+    {
+      "layer": 3,
+      "transform_fro": 24.167565306059394,
+      "distance_to_identity": 9.162220214305702,
+      "distance_to_whitened_identity": 6.404093001336767,
+      "total_delta_trace": 157.0694089739135,
+      "post_delta_trace": 160.19072219116117,
+      "post_shared_trace": 615.067438417133,
+      "base_trace": 796.8067130057641,
+      "max_whitened_delta": 1.9298714734008025,
+      "max_shared_eigenvalue": null,
+      "min_shared_eigenvalue": null,
+      "max_residual_gain": 1.0,
+      "min_residual_gain": 0.531451257351834
+    }
+  ],
+  "note": "Iterative-refinement version of the old disagreement formulation: reduce the current whitened disagreement matrix via a local residual solve for ||M + RM + MR||_F^2 + lambda ||R||_F^2."
+}

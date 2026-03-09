@@ -1,0 +1,58 @@
+{
+  "dataset": "cifar100",
+  "suite": "block-masking",
+  "layer_method": "paper-cca-shared",
+  "activation": "relu",
+  "lambda": 1.0,
+  "depth": 3,
+  "final_dim": 32,
+  "n_train": 6000,
+  "n_test": 1000,
+  "full_probe_accuracy": 0.148,
+  "final_pca_probe_accuracy": 0.131,
+  "raw_input_pca_probe_accuracy": 0.126,
+  "layers": [
+    {
+      "layer": 1,
+      "distance_to_identity": 3379.13390922409,
+      "distance_to_whitened_identity": NaN,
+      "total_delta_trace": 38.4209208575163,
+      "post_delta_trace": 872.0503711863955,
+      "post_shared_trace": 2548.259038013138,
+      "base_trace": 3246.4604219431994,
+      "max_whitened_delta": NaN,
+      "max_shared_eigenvalue": 0.9971691398055177,
+      "min_shared_eigenvalue": -0.4528124270247803,
+      "max_canonical_correlation": null,
+      "min_canonical_correlation": null
+    },
+    {
+      "layer": 2,
+      "distance_to_identity": 239.98300245366153,
+      "distance_to_whitened_identity": NaN,
+      "total_delta_trace": 872.0503711863955,
+      "post_delta_trace": 1163.656129359972,
+      "post_shared_trace": 2414.330383689341,
+      "base_trace": 3222.459352232873,
+      "max_whitened_delta": NaN,
+      "max_shared_eigenvalue": 0.9982448880692163,
+      "min_shared_eigenvalue": -0.5707066562620727,
+      "max_canonical_correlation": null,
+      "min_canonical_correlation": null
+    },
+    {
+      "layer": 3,
+      "distance_to_identity": 163.23060753424366,
+      "distance_to_whitened_identity": NaN,
+      "total_delta_trace": 1163.656129359972,
+      "post_delta_trace": 1469.5837173912048,
+      "post_shared_trace": 2269.1103400988814,
+      "base_trace": 3206.967269320782,
+      "max_whitened_delta": NaN,
+      "max_shared_eigenvalue": 0.9983698166528676,
+      "min_shared_eigenvalue": -0.617618040733899,
+      "max_canonical_correlation": null,
+      "min_canonical_correlation": null
+    }
+  ]
+}

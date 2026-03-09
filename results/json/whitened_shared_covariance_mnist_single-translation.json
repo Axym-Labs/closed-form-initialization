@@ -1,0 +1,47 @@
+{
+  "suite": "single-translation",
+  "depth": 3,
+  "final_dim": 32,
+  "lambda": 1.0,
+  "activation": "relu",
+  "layer_method": "whitened-shared-pca",
+  "full_probe_accuracy": 0.9123333333333333,
+  "final_pca_probe_accuracy": 0.8816666666666667,
+  "raw_input_pca_probe_accuracy": 0.906,
+  "layers": [
+    {
+      "layer": 1,
+      "transform_fro": 1426.6879085860382,
+      "distance_to_identity": 1426.9596381300462,
+      "distance_to_whitened_identity": NaN,
+      "total_delta_trace": 56.6130833788987,
+      "post_delta_trace": 837.3400979558232,
+      "post_shared_trace": 361.634362588705,
+      "base_trace": 783.3738542878766,
+      "max_whitened_delta": NaN
+    },
+    {
+      "layer": 2,
+      "transform_fro": 209.503998186382,
+      "distance_to_identity": 211.36667532868046,
+      "distance_to_whitened_identity": NaN,
+      "total_delta_trace": 837.3400979558232,
+      "post_delta_trace": 824.0238544118706,
+      "post_shared_trace": 376.29398766538014,
+      "base_trace": 774.0155152342606,
+      "max_whitened_delta": NaN
+    },
+    {
+      "layer": 3,
+      "transform_fro": 48.51833064648421,
+      "distance_to_identity": 55.9685971863045,
+      "distance_to_whitened_identity": NaN,
+      "total_delta_trace": 824.0238544118706,
+      "post_delta_trace": 813.4954760649027,
+      "post_shared_trace": 383.13283026652846,
+      "base_trace": 771.1041984284018,
+      "max_whitened_delta": NaN
+    }
+  ],
+  "note": "Closed-form Barlow Twins layer with objective tr(G^T M G) + lambda ||G - I||_F^2, whose exact solution is G = lambda (M + lambda I)^(-1)."
+}

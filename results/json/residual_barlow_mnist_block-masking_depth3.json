@@ -1,0 +1,59 @@
+{
+  "suite": "block-masking",
+  "depth": 3,
+  "final_dim": 32,
+  "lambda": 1.0,
+  "activation": "relu",
+  "layer_method": "residual-barlow",
+  "full_probe_accuracy": 0.9433333333333334,
+  "final_pca_probe_accuracy": 0.8953333333333333,
+  "raw_input_pca_probe_accuracy": 0.906,
+  "layers": [
+    {
+      "layer": 1,
+      "transform_fro": 30.35078276657581,
+      "distance_to_identity": 6.276554353134235,
+      "distance_to_whitened_identity": 2.8019260482408006,
+      "total_delta_trace": 9.478245080465364,
+      "post_delta_trace": 206.87793522412673,
+      "post_shared_trace": 565.3115185767598,
+      "base_trace": 705.2622282989179,
+      "max_whitened_delta": NaN,
+      "max_shared_eigenvalue": 0.9999614137183304,
+      "min_shared_eigenvalue": -0.11867519530885029,
+      "max_residual_gain": 1.3090106840185907,
+      "min_residual_gain": 0.7486422940478243
+    },
+    {
+      "layer": 2,
+      "transform_fro": 31.001695443775763,
+      "distance_to_identity": 5.686937089626969,
+      "distance_to_whitened_identity": 3.5822619564517253,
+      "total_delta_trace": 206.87793522412673,
+      "post_delta_trace": 246.23418418948484,
+      "post_shared_trace": 548.2208175037487,
+      "base_trace": 700.0731179596526,
+      "max_whitened_delta": NaN,
+      "max_shared_eigenvalue": 0.9900528952642171,
+      "min_shared_eigenvalue": -0.03540046068616931,
+      "max_residual_gain": 1.3090138667398779,
+      "min_residual_gain": 0.9270583332271009
+    },
+    {
+      "layer": 3,
+      "transform_fro": 31.247493298587354,
+      "distance_to_identity": 5.138337817012366,
+      "distance_to_whitened_identity": 3.923302582346498,
+      "total_delta_trace": 246.23418418948484,
+      "post_delta_trace": 333.74268271359017,
+      "post_shared_trace": 573.8225339522121,
+      "base_trace": 757.239188645153,
+      "max_whitened_delta": NaN,
+      "max_shared_eigenvalue": 0.9910133515026578,
+      "min_shared_eigenvalue": -0.012507032211376501,
+      "max_residual_gain": 1.3090169943713543,
+      "min_residual_gain": 0.9746889210963814
+    }
+  ],
+  "note": "Closed-form Barlow Twins layer with objective tr(G^T M G) + lambda ||G - I||_F^2, whose exact solution is G = lambda (M + lambda I)^(-1)."
+}

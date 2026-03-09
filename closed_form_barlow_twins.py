@@ -22,6 +22,15 @@ REG_EPS = 1e-4
 
 LAMBDA_REG = 1.0
 LEAKY_RELU_SLOPE = 0.1
+LAYER_METHODS = [
+    "closed-form-barlow",
+    "iterref-old",
+    "iterref-symcca",
+    "residual-barlow",
+    "whitened-shared-pca",
+    "paper-cca",
+    "paper-cca-shared",
+]
 
 
 def covariance(X):
@@ -106,10 +115,16 @@ def compute_paired_stats(H1, H2):
     sigma1 = covariance(H1c)
     sigma2 = covariance(H2c)
     sigma_bar = 0.5 * (sigma1 + sigma2)
-    shared = 0.5 * (cross_covariance(H1c, H2c) + cross_covariance(H2c, H1c))
+    cross12 = cross_covariance(H1c, H2c)
+    cross21 = cross_covariance(H2c, H1c)
+    shared = 0.5 * (cross12 + cross21)
     delta = covariance(H1c - H2c)
     return {
+        "sigma1": 0.5 * (sigma1 + sigma1.T),
+        "sigma2": 0.5 * (sigma2 + sigma2.T),
         "sigma_bar": 0.5 * (sigma_bar + sigma_bar.T),
+        "cross12": cross12,
+        "cross21": cross21,
         "shared": 0.5 * (shared + shared.T),
         "delta": 0.5 * (delta + delta.T),
     }
@@ -149,6 +164,72 @@ def fit_whitened_cov_layer(stats, lambda_reg):
     }
 
 
+def fit_iterref_old_layer(stats, lambda_reg):
+    if lambda_reg <= 0.0:
+        raise ValueError("lambda must be strictly positive.")
+
+    sigma_bar = stats["sigma_bar"]
+    delta = stats["delta"]
+    sigma_sqrt, sigma_inv_sqrt = sqrt_and_inv_sqrt_psd(sigma_bar, REG_EPS)
+    m_matrix = sigma_inv_sqrt @ delta @ sigma_inv_sqrt
+    m_matrix = 0.5 * (m_matrix + m_matrix.T)
+
+    eigvals_m, eigvecs_m = eigh(m_matrix)
+
+    # First-order residual refinement of the old disagreement objective:
+    # choose R to reduce ||M + RM + MR||_F^2 + lambda ||R||_F^2.
+    residual_steps = -(2.0 * eigvals_m * eigvals_m) / (4.0 * eigvals_m * eigvals_m + lambda_reg)
+    residual_gains = 1.0 + residual_steps
+    g_matrix = (eigvecs_m * residual_gains) @ eigvecs_m.T
+    transform = sigma_sqrt @ g_matrix @ sigma_inv_sqrt
+
+    return {
+        "transform": transform,
+        "g_matrix": g_matrix,
+        "m_matrix": m_matrix,
+        "residual_steps": residual_steps,
+        "residual_gains": residual_gains,
+        "distance_to_whitened_identity": float(np.linalg.norm(g_matrix - np.eye(g_matrix.shape[0]), ord="fro")),
+        "max_m_eigenvalue": float(np.max(eigvals_m)),
+        "min_m_eigenvalue": float(np.min(eigvals_m)),
+        "max_residual_gain": float(np.max(residual_gains)),
+        "min_residual_gain": float(np.min(residual_gains)),
+    }
+
+
+def fit_residual_barlow_layer(stats, lambda_reg):
+    if lambda_reg <= 0.0:
+        raise ValueError("lambda must be strictly positive.")
+
+    sigma_bar = stats["sigma_bar"]
+    shared = stats["shared"]
+    sigma_sqrt, sigma_inv_sqrt = sqrt_and_inv_sqrt_psd(sigma_bar, REG_EPS)
+    s_matrix = sigma_inv_sqrt @ shared @ sigma_inv_sqrt
+    s_matrix = 0.5 * (s_matrix + s_matrix.T)
+
+    eigvals_s, eigvecs_s = eigh(s_matrix)
+
+    # First-order residual refinement in the whitened space:
+    # minimize ||I - (S + RS + SR)||_F^2 + lambda ||R||_F^2.
+    residual_steps = (2.0 * eigvals_s * (1.0 - eigvals_s)) / (4.0 * eigvals_s * eigvals_s + lambda_reg)
+    residual_gains = 1.0 + residual_steps
+    g_matrix = (eigvecs_s * residual_gains) @ eigvecs_s.T
+    transform = sigma_sqrt @ g_matrix @ sigma_inv_sqrt
+
+    return {
+        "transform": transform,
+        "g_matrix": g_matrix,
+        "s_matrix": s_matrix,
+        "residual_steps": residual_steps,
+        "residual_gains": residual_gains,
+        "distance_to_whitened_identity": float(np.linalg.norm(g_matrix - np.eye(g_matrix.shape[0]), ord="fro")),
+        "max_shared_eigenvalue": float(np.max(eigvals_s)),
+        "min_shared_eigenvalue": float(np.min(eigvals_s)),
+        "max_residual_gain": float(np.max(residual_gains)),
+        "min_residual_gain": float(np.min(residual_gains)),
+    }
+
+
 def fit_whitened_shared_pca_layer(stats):
     sigma_bar = stats["sigma_bar"]
     shared = stats["shared"]
@@ -167,6 +248,55 @@ def fit_whitened_shared_pca_layer(stats):
     }
 
 
+def fit_paper_cca_shared_layer(stats):
+    sigma_bar = stats["sigma_bar"] + REG_EPS * np.eye(stats["sigma_bar"].shape[0], dtype=np.float64)
+    shared = 0.5 * (stats["shared"] + stats["shared"].T)
+    eigvals, eigvecs = eigh(shared, sigma_bar)
+    order = np.argsort(eigvals)[::-1]
+    eigvals = eigvals[order]
+    eigvecs = eigvecs[:, order]
+    transform = eigvecs.T
+    return {
+        "transform": transform,
+        "generalized_eigenvalues": eigvals,
+        "max_shared_eigenvalue": float(np.max(eigvals)),
+        "min_shared_eigenvalue": float(np.min(eigvals)),
+    }
+
+
+def fit_paper_cca_layer(stats):
+    sigma1 = stats["sigma1"] + REG_EPS * np.eye(stats["sigma1"].shape[0], dtype=np.float64)
+    sigma2 = stats["sigma2"] + REG_EPS * np.eye(stats["sigma2"].shape[0], dtype=np.float64)
+    cross12 = stats["cross12"]
+    cross21 = stats["cross21"]
+
+    matrix_a = np.linalg.solve(sigma1, cross12 @ np.linalg.solve(sigma2, cross21))
+    matrix_a = 0.5 * (matrix_a + matrix_a.T)
+    eigvals_a, eigvecs_a = eigh(matrix_a)
+    order = np.argsort(eigvals_a)[::-1]
+    eigvals_a = np.maximum(eigvals_a[order], 0.0)
+    transform_a = eigvecs_a[:, order]
+
+    sigma1_norms = np.sqrt(np.maximum(np.sum(transform_a * (sigma1 @ transform_a), axis=0), REG_EPS))
+    transform_a = transform_a / sigma1_norms[None, :]
+
+    canonical_corrs = np.sqrt(eigvals_a)
+    transform_b = np.linalg.solve(sigma2, cross21 @ transform_a)
+    transform_b = transform_b / np.maximum(canonical_corrs[None, :], np.sqrt(REG_EPS))
+    sigma2_norms = np.sqrt(np.maximum(np.sum(transform_b * (sigma2 @ transform_b), axis=0), REG_EPS))
+    transform_b = transform_b / sigma2_norms[None, :]
+
+    transform_base = 0.5 * (transform_a + transform_b)
+    return {
+        "transform_a": transform_a,
+        "transform_b": transform_b,
+        "transform_base": transform_base,
+        "canonical_correlations": canonical_corrs,
+        "max_canonical_correlation": float(np.max(canonical_corrs)),
+        "min_canonical_correlation": float(np.min(canonical_corrs)),
+    }
+
+
 def fit_layer(H1, H2, lambda_reg):
     stats = compute_paired_stats(H1, H2)
     model = fit_whitened_cov_layer(
@@ -176,6 +306,9 @@ def fit_layer(H1, H2, lambda_reg):
     whitened_delta = model["m_matrix"]
     return {
         "transform": model["transform"],
+        "transform_base": model["transform"],
+        "transform_view1": model["transform"],
+        "transform_view2": model["transform"],
         "stats": stats,
         "transform_fro": float(np.linalg.norm(model["transform"], ord="fro")),
         "distance_to_identity": float(np.linalg.norm(model["transform"] - np.eye(model["transform"].shape[0]), ord="fro")),
@@ -186,14 +319,103 @@ def fit_layer(H1, H2, lambda_reg):
     }
 
 
+def fit_residual_barlow_from_pairs(H1, H2, lambda_reg):
+    stats = compute_paired_stats(H1, H2)
+    model = fit_residual_barlow_layer(stats, lambda_reg=lambda_reg)
+    transform = model["transform"]
+    return {
+        "transform": transform,
+        "transform_base": transform,
+        "transform_view1": transform,
+        "transform_view2": transform,
+        "stats": stats,
+        "transform_fro": float(np.linalg.norm(transform, ord="fro")),
+        "distance_to_identity": float(np.linalg.norm(transform - np.eye(transform.shape[0]), ord="fro")),
+        "distance_to_whitened_identity": model["distance_to_whitened_identity"],
+        "total_delta_trace": float(np.trace(stats["delta"])),
+        "min_whitened_delta": float("nan"),
+        "max_whitened_delta": float("nan"),
+        "max_shared_eigenvalue": model["max_shared_eigenvalue"],
+        "min_shared_eigenvalue": model["min_shared_eigenvalue"],
+        "max_residual_gain": model["max_residual_gain"],
+        "min_residual_gain": model["min_residual_gain"],
+    }
+
+
+def fit_iterref_old_from_pairs(H1, H2, lambda_reg):
+    stats = compute_paired_stats(H1, H2)
+    model = fit_iterref_old_layer(stats, lambda_reg=lambda_reg)
+    transform = model["transform"]
+    return {
+        "transform": transform,
+        "transform_base": transform,
+        "transform_view1": transform,
+        "transform_view2": transform,
+        "stats": stats,
+        "transform_fro": float(np.linalg.norm(transform, ord="fro")),
+        "distance_to_identity": float(np.linalg.norm(transform - np.eye(transform.shape[0]), ord="fro")),
+        "distance_to_whitened_identity": model["distance_to_whitened_identity"],
+        "total_delta_trace": float(np.trace(stats["delta"])),
+        "min_whitened_delta": model["min_m_eigenvalue"],
+        "max_whitened_delta": model["max_m_eigenvalue"],
+        "max_residual_gain": model["max_residual_gain"],
+        "min_residual_gain": model["min_residual_gain"],
+    }
+
+
 def fit_whitened_shared_pca_from_pairs(H1, H2):
     stats = compute_paired_stats(H1, H2)
     model = fit_whitened_shared_pca_layer(stats)
     return {
         "transform": model["transform"],
+        "transform_base": model["transform"],
+        "transform_view1": model["transform"],
+        "transform_view2": model["transform"],
         "stats": stats,
         "transform_fro": float(np.linalg.norm(model["transform"], ord="fro")),
         "distance_to_identity": float(np.linalg.norm(model["transform"] - np.eye(model["transform"].shape[0]), ord="fro")),
+        "distance_to_whitened_identity": float("nan"),
+        "total_delta_trace": float(np.trace(stats["delta"])),
+        "min_whitened_delta": float("nan"),
+        "max_whitened_delta": float("nan"),
+        "max_shared_eigenvalue": model["max_shared_eigenvalue"],
+        "min_shared_eigenvalue": model["min_shared_eigenvalue"],
+    }
+
+
+def fit_paper_cca_from_pairs(H1, H2):
+    stats = compute_paired_stats(H1, H2)
+    model = fit_paper_cca_layer(stats)
+    transform_base = model["transform_base"]
+    return {
+        "transform": transform_base,
+        "transform_base": transform_base,
+        "transform_view1": model["transform_a"],
+        "transform_view2": model["transform_b"],
+        "stats": stats,
+        "transform_fro": float(np.linalg.norm(transform_base, ord="fro")),
+        "distance_to_identity": float(np.linalg.norm(transform_base - np.eye(transform_base.shape[0]), ord="fro")),
+        "distance_to_whitened_identity": float("nan"),
+        "total_delta_trace": float(np.trace(stats["delta"])),
+        "min_whitened_delta": float("nan"),
+        "max_whitened_delta": float("nan"),
+        "max_canonical_correlation": model["max_canonical_correlation"],
+        "min_canonical_correlation": model["min_canonical_correlation"],
+    }
+
+
+def fit_paper_cca_shared_from_pairs(H1, H2):
+    stats = compute_paired_stats(H1, H2)
+    model = fit_paper_cca_shared_layer(stats)
+    transform = model["transform"]
+    return {
+        "transform": transform,
+        "transform_base": transform,
+        "transform_view1": transform,
+        "transform_view2": transform,
+        "stats": stats,
+        "transform_fro": float(np.linalg.norm(transform, ord="fro")),
+        "distance_to_identity": float(np.linalg.norm(transform - np.eye(transform.shape[0]), ord="fro")),
         "distance_to_whitened_identity": float("nan"),
         "total_delta_trace": float(np.trace(stats["delta"])),
         "min_whitened_delta": float("nan"),
@@ -237,7 +459,62 @@ def top_pca_projection(Xtr, d):
     return evecs[:, -d:]
 
 
-def run_experiment(suite_name, depth, final_dim, lambda_reg, activation="relu"):
+def fit_layer_by_method(method_name, view1_tr, view2_tr, lambda_reg):
+    if method_name == "closed-form-barlow":
+        return fit_layer(view1_tr, view2_tr, lambda_reg=lambda_reg)
+    if method_name == "iterref-old":
+        return fit_iterref_old_from_pairs(view1_tr, view2_tr, lambda_reg=lambda_reg)
+    if method_name == "iterref-symcca":
+        return fit_residual_barlow_from_pairs(view1_tr, view2_tr, lambda_reg=lambda_reg)
+    if method_name == "residual-barlow":
+        return fit_residual_barlow_from_pairs(view1_tr, view2_tr, lambda_reg=lambda_reg)
+    if method_name == "whitened-shared-pca":
+        return fit_whitened_shared_pca_from_pairs(view1_tr, view2_tr)
+    if method_name == "paper-cca":
+        return fit_paper_cca_from_pairs(view1_tr, view2_tr)
+    if method_name == "paper-cca-shared":
+        return fit_paper_cca_shared_from_pairs(view1_tr, view2_tr)
+    raise ValueError(f"Unknown layer method: {method_name}")
+
+
+def method_note(method_name):
+    if method_name == "closed-form-barlow":
+        return (
+            "Closed-form Barlow Twins layer with objective "
+            "tr(G^T M G) + lambda ||G - I||_F^2, whose exact solution is "
+            "G = lambda (M + lambda I)^(-1)."
+        )
+    if method_name == "iterref-old":
+        return (
+            "Iterative-refinement version of the old disagreement formulation: "
+            "reduce the current whitened disagreement matrix via a local residual solve "
+            "for ||M + RM + MR||_F^2 + lambda ||R||_F^2."
+        )
+    if method_name == "iterref-symcca":
+        return (
+            "Iterative-refinement version of the symmetric CCA/shared-correlation "
+            "formulation: reduce the current mismatch to identity via "
+            "||I - (S + RS + SR)||_F^2 + lambda ||R||_F^2."
+        )
+    if method_name == "residual-barlow":
+        return (
+            "Residual Barlow layer using a first-order refinement of the whitened "
+            "shared-correlation target: choose a near-identity residual update that "
+            "reduces ||I - (S + RS + SR)||_F^2 + lambda ||R||_F^2."
+        )
+    if method_name == "whitened-shared-pca":
+        return (
+            "Whitened shared-covariance PCA layer: diagonalize the whitened shared "
+            "cross-covariance and rotate into its eigenbasis."
+        )
+    if method_name == "paper-cca":
+        return "Untied linear CCA layer from the paper-equivalent Barlow/CCA solution."
+    if method_name == "paper-cca-shared":
+        return "Shared-weight generalized-eigenvalue layer corresponding to the symmetric paper CCA solution."
+    raise ValueError(f"Unknown layer method: {method_name}")
+
+
+def run_experiment(suite_name, depth, final_dim, lambda_reg, activation="relu", layer_method="closed-form-barlow"):
     xtr, ytr, xte, yte = load_mnist_numpy()
     base_tr = xtr.copy()
     base_te = xte.copy()
@@ -246,19 +523,17 @@ def run_experiment(suite_name, depth, final_dim, lambda_reg, activation="relu"):
 
     layers = []
     for layer_idx in range(depth):
-        model = fit_layer(
-            view1_tr,
-            view2_tr,
-            lambda_reg=lambda_reg,
-        )
-        transform = model["transform"]
+        model = fit_layer_by_method(layer_method, view1_tr, view2_tr, lambda_reg=lambda_reg)
+        transform_base = model["transform_base"]
+        transform_view1 = model["transform_view1"]
+        transform_view2 = model["transform_view2"]
 
-        base_tr = apply_layer(base_tr, transform, activation=activation)
-        base_te = apply_layer(base_te, transform, activation=activation)
-        view1_tr = apply_layer(view1_tr, transform, activation=activation)
-        view2_tr = apply_layer(view2_tr, transform, activation=activation)
-        view1_te = apply_layer(view1_te, transform, activation=activation)
-        view2_te = apply_layer(view2_te, transform, activation=activation)
+        base_tr = apply_layer(base_tr, transform_base, activation=activation)
+        base_te = apply_layer(base_te, transform_base, activation=activation)
+        view1_tr = apply_layer(view1_tr, transform_view1, activation=activation)
+        view2_tr = apply_layer(view2_tr, transform_view2, activation=activation)
+        view1_te = apply_layer(view1_te, transform_view1, activation=activation)
+        view2_te = apply_layer(view2_te, transform_view2, activation=activation)
 
         train_arrays, test_arrays = normalize_hidden(
             [base_tr, view1_tr, view2_tr],
@@ -279,6 +554,10 @@ def run_experiment(suite_name, depth, final_dim, lambda_reg, activation="relu"):
                 "post_shared_trace": float(np.trace(post_stats["shared"])),
                 "base_trace": float(np.trace(covariance(base_tr))),
                 "max_whitened_delta": model["max_whitened_delta"],
+                "max_shared_eigenvalue": model.get("max_shared_eigenvalue"),
+                "min_shared_eigenvalue": model.get("min_shared_eigenvalue"),
+                "max_residual_gain": model.get("max_residual_gain"),
+                "min_residual_gain": model.get("min_residual_gain"),
             }
         )
 
@@ -303,15 +582,12 @@ def run_experiment(suite_name, depth, final_dim, lambda_reg, activation="relu"):
         "final_dim": final_dim,
         "lambda": lambda_reg,
         "activation": activation,
+        "layer_method": layer_method,
         "full_probe_accuracy": acc_full,
         "final_pca_probe_accuracy": acc_pca32,
         "raw_input_pca_probe_accuracy": acc_raw_pca32,
         "layers": layers,
-        "note": (
-            "Closed-form Barlow Twins layer with objective "
-            "tr(G^T M G) + lambda ||G - I||_F^2, whose exact solution is "
-            "G = lambda (M + lambda I)^(-1)."
-        ),
+        "note": method_note(layer_method),
     }
 
 
@@ -322,6 +598,7 @@ def main():
         default="single-translation",
         choices=["image", "translation", "single-translation", "random-masking", "block-masking", "blurring", "rotation", "random-crops"],
     )
+    parser.add_argument("--layer-method", choices=LAYER_METHODS, default="closed-form-barlow")
     parser.add_argument("--depth", type=int, default=DEPTH)
     parser.add_argument("--final-d", type=int, default=FINAL_D)
     parser.add_argument("--lambda", dest="lambda_reg", type=float, default=LAMBDA_REG)
@@ -338,10 +615,11 @@ def main():
         final_dim=args.final_d,
         lambda_reg=args.lambda_reg,
         activation=args.activation,
+        layer_method=args.layer_method,
     )
 
     print(
-        f"Closed-form Barlow Twins  |  suite={result['suite']}  |  depth={result['depth']}  |  activation={result['activation']}  |  final_d={result['final_dim']}"
+        f"Analytic MNIST DNN  |  method={result['layer_method']}  |  suite={result['suite']}  |  depth={result['depth']}  |  activation={result['activation']}  |  final_d={result['final_dim']}"
     )
     print(f"full probe accuracy      : {result['full_probe_accuracy']:.4f}")
     print(f"final PCA-{result['final_dim']} probe : {result['final_pca_probe_accuracy']:.4f}")
