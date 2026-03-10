@@ -1,0 +1,36 @@
+{
+  "dataset": "cifar10",
+  "width": 256,
+  "depth": 3,
+  "activation": "tanh",
+  "reg": 1.0,
+  "head_reg": 0.01,
+  "n_train": 6000,
+  "n_test": 1000,
+  "classifier_accuracy": 0.264,
+  "layers": [
+    {
+      "layer": 1,
+      "stage": "stem",
+      "classifier_accuracy": 0.281,
+      "residual_target_norm": 1193.939241886074,
+      "update_norm": 15.009842669425247
+    },
+    {
+      "layer": 2,
+      "stage": "residual",
+      "classifier_accuracy": 0.272,
+      "residual_target_norm": 1193.679870381926,
+      "update_norm": 4.370563374218684
+    },
+    {
+      "layer": 3,
+      "stage": "residual",
+      "classifier_accuracy": 0.264,
+      "residual_target_norm": 1188.343445608486,
+      "update_norm": 12.5573243102232
+    }
+  ],
+  "num_params": 920064,
+  "note": "Supervised residual target-embedding network. The stem and each residual block are fit by closed-form ridge regression, and nonlinear activation is applied after each update."
+}

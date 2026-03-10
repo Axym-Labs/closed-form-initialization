@@ -1,0 +1,38 @@
+{
+  "dataset": "mnist",
+  "depth": 3,
+  "rff_dim": 256,
+  "head_reg": 0.01,
+  "n_train": 12000,
+  "n_test": 3000,
+  "ridge_classifier_accuracy": 0.6216666666666667,
+  "direct_prototype_accuracy": 0.5353333333333333,
+  "layers": [
+    {
+      "layer": 1,
+      "ridge_classifier_accuracy": 0.8056666666666666,
+      "direct_prototype_accuracy": 0.6786666666666666,
+      "bandwidth": 7.155659044625962,
+      "prototype_norm": 2.1072981335301613,
+      "feature_norm": 108.87862317579048
+    },
+    {
+      "layer": 2,
+      "ridge_classifier_accuracy": 0.725,
+      "direct_prototype_accuracy": 0.6286666666666667,
+      "bandwidth": 2.6523059764704833,
+      "prototype_norm": 2.2950672878388745,
+      "feature_norm": 110.10245504186857
+    },
+    {
+      "layer": 3,
+      "ridge_classifier_accuracy": 0.6216666666666667,
+      "direct_prototype_accuracy": 0.5353333333333333,
+      "bandwidth": 2.4516364987802763,
+      "prototype_norm": 2.238152485582138,
+      "feature_norm": 108.788863502513
+    }
+  ],
+  "num_params": 8448,
+  "note": "HSIC / kernel-mean-embedding analytic network. Each layer lifts the current representation with Gaussian random Fourier features, computes per-class kernel mean embeddings in that feature space, and feeds the resulting class-similarity scores to the next layer."
+}

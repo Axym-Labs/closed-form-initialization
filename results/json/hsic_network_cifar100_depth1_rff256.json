@@ -1,0 +1,22 @@
+{
+  "dataset": "cifar100",
+  "depth": 1,
+  "rff_dim": 256,
+  "head_reg": 0.01,
+  "n_train": 6000,
+  "n_test": 1000,
+  "ridge_classifier_accuracy": 0.125,
+  "direct_prototype_accuracy": 0.067,
+  "layers": [
+    {
+      "layer": 1,
+      "ridge_classifier_accuracy": 0.125,
+      "direct_prototype_accuracy": 0.067,
+      "bandwidth": 13.6271794302187,
+      "prototype_norm": 6.6029622534234464,
+      "feature_norm": 77.5377498842594
+    }
+  ],
+  "num_params": 25856,
+  "note": "HSIC / kernel-mean-embedding analytic network. Each layer lifts the current representation with Gaussian random Fourier features, computes per-class kernel mean embeddings in that feature space, and feeds the resulting class-similarity scores to the next layer."
+}

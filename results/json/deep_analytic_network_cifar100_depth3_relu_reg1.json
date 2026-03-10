@@ -1,0 +1,35 @@
+{
+  "dataset": "cifar100",
+  "depth": 3,
+  "reg": 1.0,
+  "head_reg": 0.01,
+  "activation": "relu",
+  "n_train": 6000,
+  "n_test": 1000,
+  "classifier_accuracy": 0.043,
+  "layers": [
+    {
+      "layer": 1,
+      "classifier_accuracy": 0.036,
+      "feature_dim": 3172,
+      "predictor_norm": 15.038013902482682,
+      "relearned_norm": 41.48039662435134
+    },
+    {
+      "layer": 2,
+      "classifier_accuracy": 0.044,
+      "feature_dim": 3272,
+      "predictor_norm": 9.928663107489104,
+      "relearned_norm": 63.44837767140699
+    },
+    {
+      "layer": 3,
+      "classifier_accuracy": 0.043,
+      "feature_dim": 3372,
+      "predictor_norm": 5.565472117229089,
+      "relearned_norm": 71.91760200789867
+    }
+  ],
+  "num_params": 951600,
+  "note": "Deep Analytic Network style baseline. Each layer solves a closed-form ridge regression to the labels, passes the prediction features through a nonlinearity, concatenates them to the running representation, and trains the next layer on the accumulated features."
+}

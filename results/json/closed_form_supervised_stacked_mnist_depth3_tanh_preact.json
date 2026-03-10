@@ -1,0 +1,37 @@
+{
+  "dataset": "mnist",
+  "width": 256,
+  "depth": 3,
+  "activation": "tanh",
+  "update_mode": "stacked",
+  "reg": 1.0,
+  "head_reg": 0.01,
+  "n_train": 12000,
+  "n_test": 3000,
+  "classifier_accuracy": 0.5446666666666666,
+  "layers": [
+    {
+      "layer": 1,
+      "stage": "stem",
+      "classifier_accuracy": 0.8883333333333333,
+      "residual_target_norm": 74.56599288635685,
+      "update_norm": 4.307748434193253
+    },
+    {
+      "layer": 2,
+      "stage": "residual",
+      "classifier_accuracy": 0.5123333333333333,
+      "residual_target_norm": 108.41632521059896,
+      "update_norm": 9.644264789724078
+    },
+    {
+      "layer": 3,
+      "stage": "residual",
+      "classifier_accuracy": 0.5446666666666666,
+      "residual_target_norm": 104.51826745076332,
+      "update_norm": 0.5016188853360256
+    }
+  ],
+  "num_params": 334336,
+  "note": "Supervised pre-activation greedy target-embedding network. The stem and each residual block are fit by closed-form ridge regression, the block output is linear, and the nonlinear activation is applied only when the next block consumes that state. Update mode: stacked."
+}

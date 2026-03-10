@@ -1,0 +1,25 @@
+{
+  "dataset": "mnist",
+  "width": 256,
+  "depth": 1,
+  "activation": "relu",
+  "update_mode": "residual",
+  "block_target": "task-gradient",
+  "shrinkage": 1.0,
+  "reg": 100.0,
+  "head_reg": 0.01,
+  "n_train": 12000,
+  "n_test": 3000,
+  "classifier_accuracy": 0.8993333333333333,
+  "layers": [
+    {
+      "layer": 1,
+      "stage": "stem",
+      "classifier_accuracy": 0.8993333333333333,
+      "block_target_norm": 75.6351999469624,
+      "update_norm": 1.267467761832368
+    }
+  ],
+  "num_params": 203264,
+  "note": "Supervised pre-activation greedy residual network. The stem and each residual block are fit by closed-form ridge regression, the block output is linear, and the nonlinear activation is applied only when the next block consumes that state. Block target: task-gradient. Update mode: residual. Shrinkage: 1.0. Hidden normalization between blocks: False."
+}

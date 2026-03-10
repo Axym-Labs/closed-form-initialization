@@ -1,0 +1,37 @@
+{
+  "dataset": "cifar100",
+  "width": 256,
+  "depth": 3,
+  "activation": "relu",
+  "update_mode": "residual",
+  "reg": 10.0,
+  "head_reg": 0.01,
+  "n_train": 6000,
+  "n_test": 1000,
+  "classifier_accuracy": 0.062,
+  "layers": [
+    {
+      "layer": 1,
+      "stage": "stem",
+      "classifier_accuracy": 0.076,
+      "residual_target_norm": 67.30542745584364,
+      "update_norm": 5.308038874041111
+    },
+    {
+      "layer": 2,
+      "stage": "residual",
+      "classifier_accuracy": 0.069,
+      "residual_target_norm": 63.14687431290364,
+      "update_norm": 0.5204318691075118
+    },
+    {
+      "layer": 3,
+      "stage": "residual",
+      "classifier_accuracy": 0.062,
+      "residual_target_norm": 61.68397901445679,
+      "update_norm": 0.40326689961921575
+    }
+  ],
+  "num_params": 943104,
+  "note": "Supervised pre-activation greedy target-embedding network. The stem and each residual block are fit by closed-form ridge regression, the block output is linear, and the nonlinear activation is applied only when the next block consumes that state. Update mode: residual."
+}
