@@ -1,0 +1,18 @@
+{
+  "dataset": "mnist",
+  "variant": "unsupervised-info-ridge",
+  "memory_count": 512,
+  "iterations": 5,
+  "beta": 1.5,
+  "fit_time_sec": 0.44453559978865087,
+  "inference_time_sec": 3.4795654001645744,
+  "state_probe_accuracy": 0.91,
+  "coefficient_probe_accuracy": 0.888,
+  "state_pca32_probe_accuracy": 0.9053333333333333,
+  "slot_decode_accuracy": null,
+  "raw_linear_probe_accuracy": 0.9003333333333333,
+  "raw_pca32_probe_accuracy": 0.906,
+  "plot_path": "C:\\Users\\DavWi\\Main\\Projekte\\vicreg_superlinear\\results\\plots\\hopfield_retrieval_mnist_unsupervised-info-ridge.png",
+  "ridge_lambda": 2.9317093373218253,
+  "note": "Hopfield-style associative memory with a capped memory bank and a pseudoinverse-family closed-form memory matrix. The reported state accuracy uses a multinomial linear probe on the retrieved state after a fixed number of tanh retrieval steps."
+}

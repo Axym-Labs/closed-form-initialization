@@ -18,6 +18,9 @@ UPDATE_MODES = ["residual", "stacked"]
 BLOCK_TARGETS = ["embedding", "task-gradient"]
 SHRINKAGE = 1.0
 TARGET_CODES = ["random", "onehot", "orthogonal"]
+HEAD_MODES = ["ridge-head", "direct-output"]
+INFO_ACTIVATIONS = ["pmi-gate", "entropy-gate", "negentropy-gate", "coderate-gate"]
+PERF_ACTIVATIONS = ["confidence-gate", "margin-gate", "entropy-cal-gate"]
 
 
 def one_hot(y, num_classes):
@@ -77,15 +80,182 @@ def ridge_head_accuracy(Htr, ytr, Hte, yte, reg):
     return float((pred == yte).mean()), head
 
 
+def squared_prediction_loss(pred, target):
+    residual = target - pred
+    return float(0.5 * np.mean(np.sum(residual * residual, axis=1)))
+
+
 def apply_activation(X, activation):
     return cfbt.apply_activation(X, activation)
 
 
-def hidden_for_next_block(G, activation):
-    return apply_activation(G, activation)
+def sigmoid(X):
+    return 1.0 / (1.0 + np.exp(-np.clip(X, -40.0, 40.0)))
+
+
+def softmax(X):
+    X_shift = X - X.max(axis=1, keepdims=True)
+    exp_x = np.exp(X_shift)
+    return exp_x / np.sum(exp_x, axis=1, keepdims=True)
+
+
+def entropy_from_logits(G):
+    p = softmax(G)
+    return -np.sum(p * np.log(np.maximum(p, 1e-12)), axis=1, keepdims=True)
+
+
+def robust_center_scale(scores):
+    center = np.median(scores, axis=0, keepdims=True)
+    mad = np.median(np.abs(scores - center), axis=0, keepdims=True)
+    scale = np.where(mad > 1e-6, 1.4826 * mad, 1.0)
+    return center, scale
+
+
+def log_gaussian_density(x, mean, var):
+    var = np.maximum(var, 1e-6)
+    return -0.5 * (np.log(2.0 * np.pi * var) + ((x - mean) ** 2) / var)
+
+
+def fit_activation_state(Gtr, ytr, activation):
+    if activation not in INFO_ACTIVATIONS + PERF_ACTIVATIONS:
+        return None
+
+    if activation in PERF_ACTIVATIONS:
+        probs = softmax(Gtr)
+        pred = np.argmax(Gtr, axis=1)
+        correct = pred == ytr
+        if activation == "confidence-gate":
+            stat = np.max(probs, axis=1, keepdims=True)
+            direction = -1.0
+        elif activation == "margin-gate":
+            top2 = np.partition(Gtr, -2, axis=1)[:, -2:]
+            stat = (top2[:, 1] - top2[:, 0]).reshape(-1, 1)
+            direction = 1.0
+        elif activation == "entropy-cal-gate":
+            stat = entropy_from_logits(Gtr)
+            direction = 1.0
+        else:
+            raise ValueError(f"Unknown activation: {activation}")
+
+        if np.any(correct) and np.any(~correct):
+            mean_correct = stat[correct].mean(axis=0, keepdims=True)
+            mean_wrong = stat[~correct].mean(axis=0, keepdims=True)
+            center = 0.5 * (mean_correct + mean_wrong)
+            scale = np.maximum(np.std(stat, axis=0, keepdims=True), 1e-3)
+        else:
+            center, scale = robust_center_scale(stat)
+        return {
+            "activation": activation,
+            "center": center,
+            "scale": scale,
+            "direction": direction,
+        }
+
+    if activation == "pmi-gate":
+        num_classes = int(np.max(ytr) + 1)
+        global_mean = Gtr.mean(axis=0, keepdims=True)
+        global_var = Gtr.var(axis=0, keepdims=True) + 1e-6
+        class_mean = np.zeros((num_classes, Gtr.shape[1]), dtype=np.float64)
+        class_var = np.zeros((num_classes, Gtr.shape[1]), dtype=np.float64)
+        for cls in range(num_classes):
+            cls_vals = Gtr[ytr == cls]
+            class_mean[cls] = cls_vals.mean(axis=0)
+            class_var[cls] = cls_vals.var(axis=0) + 1e-6
+        pred = np.argmax(Gtr, axis=1)
+        cond_mean = class_mean[pred]
+        cond_var = class_var[pred]
+        raw_scores = log_gaussian_density(Gtr, cond_mean, cond_var) - log_gaussian_density(Gtr, global_mean, global_var)
+    elif activation == "entropy-gate":
+        base_entropy = entropy_from_logits(Gtr)
+        raw_scores = np.empty_like(Gtr)
+        for j in range(Gtr.shape[1]):
+            masked = Gtr.copy()
+            masked[:, j] = 0.0
+            raw_scores[:, j] = (entropy_from_logits(masked) - base_entropy)[:, 0]
+    elif activation == "negentropy-gate":
+        mean = Gtr.mean(axis=0, keepdims=True)
+        std = Gtr.std(axis=0, keepdims=True)
+        std = np.where(std > 1e-6, std, 1.0)
+        z = (Gtr - mean) / std
+        raw_scores = 0.5 * z * z - np.sqrt(2.0) * np.abs(z)
+    elif activation == "coderate-gate":
+        mean = Gtr.mean(axis=0, keepdims=True)
+        std = Gtr.std(axis=0, keepdims=True)
+        std = np.where(std > 1e-6, std, 1.0)
+        z = (Gtr - mean) / std
+        raw_scores = 0.5 * np.log1p(z * z)
+    else:
+        raise ValueError(f"Unknown activation: {activation}")
+
+    center, scale = robust_center_scale(raw_scores)
+    return {
+        "activation": activation,
+        "center": center,
+        "scale": scale,
+        "global_mean": Gtr.mean(axis=0, keepdims=True),
+        "global_std": np.where(Gtr.std(axis=0, keepdims=True) > 1e-6, Gtr.std(axis=0, keepdims=True), 1.0),
+        "class_mean": locals().get("class_mean"),
+        "class_var": locals().get("class_var"),
+    }
+
+
+def apply_fitted_activation(G, activation, state):
+    if activation not in INFO_ACTIVATIONS + PERF_ACTIVATIONS:
+        return apply_activation(G, activation)
+
+    if activation in PERF_ACTIVATIONS:
+        probs = softmax(G)
+        if activation == "confidence-gate":
+            stat = np.max(probs, axis=1, keepdims=True)
+        elif activation == "margin-gate":
+            top2 = np.partition(G, -2, axis=1)[:, -2:]
+            stat = (top2[:, 1] - top2[:, 0]).reshape(-1, 1)
+        elif activation == "entropy-cal-gate":
+            stat = entropy_from_logits(G)
+        else:
+            raise ValueError(f"Unknown activation: {activation}")
+        normalized = state["direction"] * (stat - state["center"]) / state["scale"]
+        gates = sigmoid(normalized)
+        multipliers = 0.5 + gates
+        return multipliers * G
+
+    if activation == "pmi-gate":
+        pred = np.argmax(G, axis=1)
+        cond_mean = state["class_mean"][pred]
+        cond_var = state["class_var"][pred]
+        raw_scores = log_gaussian_density(G, cond_mean, cond_var) - log_gaussian_density(
+            G, state["global_mean"], state["global_std"] ** 2
+        )
+    elif activation == "entropy-gate":
+        base_entropy = entropy_from_logits(G)
+        raw_scores = np.empty_like(G)
+        for j in range(G.shape[1]):
+            masked = G.copy()
+            masked[:, j] = 0.0
+            raw_scores[:, j] = (entropy_from_logits(masked) - base_entropy)[:, 0]
+    elif activation == "negentropy-gate":
+        z = (G - state["global_mean"]) / state["global_std"]
+        raw_scores = 0.5 * z * z - np.sqrt(2.0) * np.abs(z)
+    elif activation == "coderate-gate":
+        z = (G - state["global_mean"]) / state["global_std"]
+        raw_scores = 0.5 * np.log1p(z * z)
+    else:
+        raise ValueError(f"Unknown activation: {activation}")
+
+    normalized = (raw_scores - state["center"]) / state["scale"]
+    gates = sigmoid(normalized)
+    multipliers = 0.5 + gates
+    return multipliers * G
+
+
+def hidden_for_next_block(Gtr, Gte, ytr, activation):
+    state = fit_activation_state(Gtr, ytr, activation)
+    return apply_fitted_activation(Gtr, activation, state), apply_fitted_activation(Gte, activation, state), state
 
 
 def activation_derivative_from_preact(G, activation):
+    if activation in INFO_ACTIVATIONS + PERF_ACTIVATIONS:
+        raise NotImplementedError("Information-theoretic activations are not supported with task-gradient blocks.")
     if activation == "relu":
         return (G > 0.0).astype(np.float64)
     if activation == "tanh":
@@ -104,37 +274,52 @@ def maybe_normalize_hidden(Htr, Hte, enabled):
     return normalize_train_test(Htr, Hte)
 
 
-def run_experiment(dataset_name, width, depth, activation, reg, head_reg, n_train, n_test, update_mode, block_target, shrinkage, target_code):
+def run_experiment(dataset_name, width, depth, activation, reg, head_reg, n_train, n_test, update_mode, block_target, shrinkage, target_code, head_mode):
     Xtr, ytr, Xte, yte = load_dataset(dataset_name, n_train=n_train, n_test=n_test)
     num_classes = int(max(np.max(ytr), np.max(yte)) + 1)
     Ytr = one_hot(ytr, num_classes)
-
-    target_embedding = class_embedding(num_classes, width, seed=SEED + 17, target_code=target_code)
-    target_tr = Ytr @ target_embedding
-    normalize_hidden_states = block_target != "task-gradient"
+    effective_width = num_classes if head_mode == "direct-output" else width
+    if head_mode == "direct-output":
+        target_tr = Ytr
+        normalize_hidden_states = False
+    else:
+        target_embedding = class_embedding(num_classes, effective_width, seed=SEED + 17, target_code=target_code)
+        target_tr = Ytr @ target_embedding
+        normalize_hidden_states = block_target != "task-gradient"
 
     stem = ridge_regression(Xtr, target_tr, reg=reg)
     Gtr = Xtr @ stem
     Gte = Xte @ stem
-    Htr = hidden_for_next_block(Gtr, activation)
-    Hte = hidden_for_next_block(Gte, activation)
+    Htr, Hte, activation_state = hidden_for_next_block(Gtr, Gte, ytr, activation)
     Htr, Hte = maybe_normalize_hidden(Htr, Hte, enabled=normalize_hidden_states)
 
     layers = []
-    acc, _ = ridge_head_accuracy(Htr, ytr, Hte, yte, reg=head_reg)
+    if head_mode == "direct-output":
+        acc = float((np.argmax(Gte, axis=1) == yte).mean())
+        head = None
+        train_loss = squared_prediction_loss(Gtr, Ytr)
+        test_loss = squared_prediction_loss(Gte, one_hot(yte, num_classes))
+    else:
+        acc, head = ridge_head_accuracy(Htr, ytr, Hte, yte, reg=head_reg)
+        train_loss = squared_prediction_loss(Htr @ head, Ytr)
+        test_loss = squared_prediction_loss(Hte @ head, one_hot(yte, num_classes))
     layers.append(
         {
             "layer": 1,
             "stage": "stem",
             "classifier_accuracy": acc,
+            "train_prediction_loss": train_loss,
+            "test_prediction_loss": test_loss,
+            "activation_mean": float(np.mean(Htr)),
             "block_target_norm": float(np.linalg.norm(target_tr - Gtr, ord="fro")),
             "update_norm": float(np.linalg.norm(stem, ord="fro")),
         }
     )
 
-    _, head = ridge_head_accuracy(Htr, ytr, Hte, yte, reg=head_reg)
     for layer_idx in range(1, depth):
-        if block_target == "embedding":
+        if head_mode == "direct-output":
+            block_fit_target = Ytr - Gtr
+        elif block_target == "embedding":
             block_fit_target = target_tr - Gtr
         elif block_target == "task-gradient":
             logits_tr = Htr @ head
@@ -154,26 +339,39 @@ def run_experiment(dataset_name, width, depth, activation, reg, head_reg, n_trai
             Gte = shrinkage * next_te
         else:
             raise ValueError(f"Unknown update mode: {update_mode}")
-        Htr = hidden_for_next_block(Gtr, activation)
-        Hte = hidden_for_next_block(Gte, activation)
+        Htr, Hte, activation_state = hidden_for_next_block(Gtr, Gte, ytr, activation)
         Htr, Hte = maybe_normalize_hidden(Htr, Hte, enabled=normalize_hidden_states)
-        acc, head = ridge_head_accuracy(Htr, ytr, Hte, yte, reg=head_reg)
+        if head_mode == "direct-output":
+            acc = float((np.argmax(Gte, axis=1) == yte).mean())
+            train_loss = squared_prediction_loss(Gtr, Ytr)
+            test_loss = squared_prediction_loss(Gte, one_hot(yte, num_classes))
+        else:
+            acc, head = ridge_head_accuracy(Htr, ytr, Hte, yte, reg=head_reg)
+            train_loss = squared_prediction_loss(Htr @ head, Ytr)
+            test_loss = squared_prediction_loss(Hte @ head, one_hot(yte, num_classes))
         layers.append(
             {
                 "layer": layer_idx + 1,
                 "stage": "residual",
                 "classifier_accuracy": acc,
+                "train_prediction_loss": train_loss,
+                "test_prediction_loss": test_loss,
+                "activation_mean": float(np.mean(Htr)),
                 "block_target_norm": float(np.linalg.norm(block_fit_target, ord="fro")),
                 "update_norm": float(np.linalg.norm(block, ord="fro")),
             }
         )
 
-    num_params = Xtr.shape[1] * width + (depth - 1) * width * width + width * num_classes
+    if head_mode == "direct-output":
+        num_params = Xtr.shape[1] * effective_width + (depth - 1) * effective_width * effective_width
+    else:
+        num_params = Xtr.shape[1] * effective_width + (depth - 1) * effective_width * effective_width + effective_width * num_classes
     return {
         "dataset": dataset_name,
-        "width": width,
+        "width": effective_width,
         "depth": depth,
         "activation": activation,
+        "head_mode": head_mode,
         "update_mode": update_mode,
         "block_target": block_target,
         "shrinkage": shrinkage,
@@ -190,7 +388,7 @@ def run_experiment(dataset_name, width, depth, activation, reg, head_reg, n_trai
             "The stem and each residual block are fit by closed-form ridge regression, "
             "the block output is linear, and the nonlinear activation is applied only "
             "when the next block consumes that state. "
-            f"Block target: {block_target}. Target code: {target_code}. Update mode: {update_mode}. "
+            f"Head mode: {head_mode}. Block target: {block_target}. Target code: {target_code}. Update mode: {update_mode}. "
             f"Shrinkage: {shrinkage}. Hidden normalization between blocks: {normalize_hidden_states}."
         ),
     }
@@ -201,7 +399,12 @@ def main():
     parser.add_argument("--dataset", choices=["mnist", "cifar10", "cifar100"], default="mnist")
     parser.add_argument("--width", type=int, default=WIDTH)
     parser.add_argument("--depth", type=int, default=DEPTH)
-    parser.add_argument("--activation", choices=["relu", "tanh", "leaky-relu", "identity"], default="tanh")
+    parser.add_argument(
+        "--activation",
+        choices=["relu", "tanh", "leaky-relu", "identity"] + INFO_ACTIVATIONS + PERF_ACTIVATIONS,
+        default="tanh",
+    )
+    parser.add_argument("--head-mode", choices=HEAD_MODES, default="ridge-head")
     parser.add_argument("--update-mode", choices=UPDATE_MODES, default="residual")
     parser.add_argument("--block-target", choices=BLOCK_TARGETS, default="embedding")
     parser.add_argument("--target-code", choices=TARGET_CODES, default="random")
@@ -218,6 +421,7 @@ def main():
         width=args.width,
         depth=args.depth,
         activation=args.activation,
+        head_mode=args.head_mode,
         update_mode=args.update_mode,
         block_target=args.block_target,
         shrinkage=args.shrinkage,
@@ -230,7 +434,7 @@ def main():
 
     print(
         f"Closed-form supervised residual  |  dataset={result['dataset']}  |  width={result['width']}  |  "
-        f"depth={result['depth']}  |  activation={result['activation']}  |  update={result['update_mode']}  |  "
+        f"depth={result['depth']}  |  activation={result['activation']}  |  head={result['head_mode']}  |  update={result['update_mode']}  |  "
         f"target={result['block_target']}  |  code={result['target_code']}  |  shrinkage={result['shrinkage']}"
     )
     print(f"classifier accuracy : {result['classifier_accuracy']:.4f}")
@@ -238,7 +442,8 @@ def main():
     for layer in result["layers"]:
         print(
             f"layer {layer['layer']:>2d} | {layer['stage']:>8s} | acc={layer['classifier_accuracy']:.4f} | "
-            f"||block-target||_F={layer['block_target_norm']:.3f} | ||update||_F={layer['update_norm']:.3f}"
+            f"train-loss={layer['train_prediction_loss']:.4f} | test-loss={layer['test_prediction_loss']:.4f} | "
+            f"mean-act={layer['activation_mean']:.4f} | ||block-target||_F={layer['block_target_norm']:.3f} | ||update||_F={layer['update_norm']:.3f}"
         )
     print(result["note"])
 

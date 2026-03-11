@@ -1,0 +1,45 @@
+{
+  "dataset": "cifar10",
+  "width": 512,
+  "depth": 3,
+  "sweeps": 3,
+  "activation": "relu",
+  "reg_fwd": 100.0,
+  "head_reg": 0.01,
+  "step_size": 1.0,
+  "n_train": 6000,
+  "n_test": 1000,
+  "classifier_accuracy": 0.322,
+  "probe_accuracy": 0.356,
+  "num_params": 2102272,
+  "sweep_stats": [
+    {
+      "sweep": 1,
+      "classifier_accuracy": 0.311,
+      "probe_accuracy": 0.327,
+      "train_logit_loss": 0.36833617879504715,
+      "mean_delta_norm": 14.864159213179455,
+      "max_delta_norm": 14.894736472309093,
+      "mean_weight_norm": 22.22918243372531
+    },
+    {
+      "sweep": 2,
+      "classifier_accuracy": 0.317,
+      "probe_accuracy": 0.324,
+      "train_logit_loss": 0.368201087519933,
+      "mean_delta_norm": 18.947355907587802,
+      "max_delta_norm": 21.064861550472813,
+      "mean_weight_norm": 17.622379717692482
+    },
+    {
+      "sweep": 3,
+      "classifier_accuracy": 0.327,
+      "probe_accuracy": 0.342,
+      "train_logit_loss": 0.3812279187012379,
+      "mean_delta_norm": 19.281496862918814,
+      "max_delta_norm": 21.434062074491894,
+      "mean_weight_norm": 15.108103047796059
+    }
+  ],
+  "note": "Closed-form DFA-style surrogate. Output error is projected to each hidden layer through fixed random feedback matrices, and each forward layer is refit by ridge regression to a one-step preactivation target A_l + eta * delta_l. This is a closed-form local least-squares analogue of DFA, not exact standard DFA."
+}

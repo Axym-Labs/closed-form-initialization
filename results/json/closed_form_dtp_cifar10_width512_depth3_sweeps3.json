@@ -1,0 +1,47 @@
+{
+  "dataset": "cifar10",
+  "width": 512,
+  "depth": 3,
+  "sweeps": 3,
+  "reg_fwd": 100.0,
+  "reg_inv": 100.0,
+  "head_reg": 0.01,
+  "n_train": 6000,
+  "n_test": 1000,
+  "classifier_accuracy": 0.358,
+  "probe_accuracy": 0.346,
+  "num_params": 2102272,
+  "sweep_stats": [
+    {
+      "sweep": 1,
+      "classifier_accuracy": 0.303,
+      "probe_accuracy": 0.288,
+      "train_logit_loss": 0.41420186021490873,
+      "hidden_target_norm": 894.3517441749497,
+      "output_inverse_norm": 1.8491423494156245,
+      "mean_inverse_norm": 23.480442768115847,
+      "mean_forward_norm": 20.517400891047835
+    },
+    {
+      "sweep": 2,
+      "classifier_accuracy": 0.34,
+      "probe_accuracy": 0.308,
+      "train_logit_loss": 0.4011631340929912,
+      "hidden_target_norm": 714.1392554035515,
+      "output_inverse_norm": 1.3200304661440407,
+      "mean_inverse_norm": 22.038802955434146,
+      "mean_forward_norm": 14.968865818509672
+    },
+    {
+      "sweep": 3,
+      "classifier_accuracy": 0.353,
+      "probe_accuracy": 0.326,
+      "train_logit_loss": 0.4068602076114715,
+      "hidden_target_norm": 613.7625523316361,
+      "output_inverse_norm": 1.0747210534951663,
+      "mean_inverse_norm": 20.404802390154064,
+      "mean_forward_norm": 11.632872008888933
+    }
+  ],
+  "note": "Closed-form DTP-style surrogate. Hidden layers use tanh so local targets can be inverted with artanh. At each sweep, inverse maps and forward maps are fit by ridge regression, and hidden targets use the standard difference correction h_hat_l = h_l + g_{l+1}(h_hat_{l+1}) - g_{l+1}(h_{l+1}). This is not exact standard DTP, but a closed-form local least-squares analogue."
+}

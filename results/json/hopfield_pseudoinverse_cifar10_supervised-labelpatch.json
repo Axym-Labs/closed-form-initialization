@@ -1,0 +1,18 @@
+{
+  "dataset": "cifar10",
+  "variant": "supervised-labelpatch",
+  "memory_count": 512,
+  "iterations": 5,
+  "beta": 1.5,
+  "fit_time_sec": 0.18951820000074804,
+  "inference_time_sec": 4.660711300093681,
+  "state_probe_accuracy": 0.293,
+  "coefficient_probe_accuracy": 0.326,
+  "state_pca32_probe_accuracy": 0.363,
+  "slot_decode_accuracy": 0.192,
+  "raw_linear_probe_accuracy": 0.283,
+  "raw_pca32_probe_accuracy": 0.375,
+  "plot_path": "C:\\Users\\DavWi\\Main\\Projekte\\vicreg_superlinear\\results\\plots\\hopfield_retrieval_cifar10_supervised-labelpatch.png",
+  "ridge_lambda": 0.0,
+  "note": "Hopfield-style associative memory with a capped memory bank and a pseudoinverse-family closed-form memory matrix. The reported state accuracy uses a multinomial linear probe on the retrieved state after a fixed number of tanh retrieval steps."
+}

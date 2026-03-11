@@ -1,0 +1,18 @@
+{
+  "dataset": "cifar100",
+  "variant": "unsupervised",
+  "memory_count": 512,
+  "iterations": 1,
+  "beta": 1.5,
+  "fit_time_sec": 0.1943085000384599,
+  "inference_time_sec": 0.8996828999370337,
+  "state_probe_accuracy": 0.093,
+  "coefficient_probe_accuracy": 0.071,
+  "state_pca32_probe_accuracy": 0.122,
+  "slot_decode_accuracy": null,
+  "raw_linear_probe_accuracy": 0.103,
+  "raw_pca32_probe_accuracy": 0.126,
+  "plot_path": "C:\\Users\\DavWi\\Main\\Projekte\\vicreg_superlinear\\results\\plots\\hopfield_retrieval_cifar100_unsupervised.png",
+  "ridge_lambda": 0.0,
+  "note": "Hopfield-style associative memory with a capped memory bank and a pseudoinverse-family closed-form memory matrix. The reported state accuracy uses a multinomial linear probe on the retrieved state after a fixed number of tanh retrieval steps."
+}

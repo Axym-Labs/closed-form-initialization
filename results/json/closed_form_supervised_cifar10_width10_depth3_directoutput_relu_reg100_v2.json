@@ -1,0 +1,50 @@
+{
+  "dataset": "cifar10",
+  "width": 10,
+  "depth": 3,
+  "activation": "relu",
+  "head_mode": "direct-output",
+  "update_mode": "residual",
+  "block_target": "embedding",
+  "shrinkage": 1.0,
+  "target_code": "onehot",
+  "reg": 100.0,
+  "head_reg": 0.01,
+  "n_train": 6000,
+  "n_test": 1000,
+  "classifier_accuracy": 0.374,
+  "layers": [
+    {
+      "layer": 1,
+      "stage": "stem",
+      "classifier_accuracy": 0.381,
+      "train_prediction_loss": 0.3957821732036002,
+      "test_prediction_loss": 0.455161764261139,
+      "activation_mean": 0.04613878024968576,
+      "block_target_norm": 68.91578976144147,
+      "update_norm": 1.348519073463752
+    },
+    {
+      "layer": 2,
+      "stage": "residual",
+      "classifier_accuracy": 0.379,
+      "train_prediction_loss": 0.34702957922709715,
+      "test_prediction_loss": 0.4181545085109822,
+      "activation_mean": 0.07844696351368312,
+      "block_target_norm": 68.91578976144147,
+      "update_norm": 1.3702307507404972
+    },
+    {
+      "layer": 3,
+      "stage": "residual",
+      "classifier_accuracy": 0.374,
+      "train_prediction_loss": 0.33331166010631347,
+      "test_prediction_loss": 0.41568806136854525,
+      "activation_mean": 0.10120585743168031,
+      "block_target_norm": 64.53181347773489,
+      "update_norm": 0.6642311780554656
+    }
+  ],
+  "num_params": 30920,
+  "note": "Supervised pre-activation greedy residual network. The stem and each residual block are fit by closed-form ridge regression, the block output is linear, and the nonlinear activation is applied only when the next block consumes that state. Head mode: direct-output. Block target: embedding. Target code: onehot. Update mode: residual. Shrinkage: 1.0. Hidden normalization between blocks: False."
+}
