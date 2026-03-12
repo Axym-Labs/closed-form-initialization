@@ -114,46 +114,20 @@ def fit_linear_probe(ztr, ytr, zte, yte):
     return float((clf.predict(zte) == yte).mean())
 
 
-def factor_patch_area(num_classes, height, width):
-    best = None
-    for patch_h in range(1, height + 1):
-        patch_w = int(np.ceil(num_classes / patch_h))
-        if patch_w > width:
-            continue
-        extra = patch_h * patch_w - num_classes
-        aspect = abs(patch_h - patch_w)
-        score = (extra, aspect)
-        if best is None or score < best[:2]:
-            best = (extra, aspect, patch_h, patch_w)
-    if best is None:
-        raise ValueError("Could not fit label patch into image.")
-    return best[2], best[3]
-
-
-def overwrite_label_patch(flat, labels, channels, height, width, scale):
+def append_label_slot(flat, labels, scale):
     num_classes = int(np.max(labels) + 1)
-    patch_h, patch_w = factor_patch_area(num_classes, height, width)
-    images = flat.reshape(flat.shape[0], channels, height, width).copy()
-    images[:, 0, :patch_h, :patch_w] = 0.0
     onehot = np.eye(num_classes, dtype=np.float64)[labels] * scale
-    patch = np.zeros((flat.shape[0], patch_h * patch_w), dtype=np.float64)
-    patch[:, :num_classes] = onehot
-    images[:, 0, :patch_h, :patch_w] = patch.reshape(flat.shape[0], patch_h, patch_w)
-    return images.reshape(flat.shape[0], -1), (patch_h, patch_w)
+    return np.concatenate([flat, onehot], axis=1), num_classes
 
 
-def zero_label_patch(flat, channels, height, width, patch_shape):
-    patch_h, patch_w = patch_shape
-    images = flat.reshape(flat.shape[0], channels, height, width).copy()
-    images[:, 0, :patch_h, :patch_w] = 0.0
-    return images.reshape(flat.shape[0], -1)
+def zero_label_slot(flat, num_classes):
+    zeros = np.zeros((flat.shape[0], num_classes), dtype=np.float64)
+    return np.concatenate([flat, zeros], axis=1)
 
 
-def decode_label_patch(flat, channels, height, width, num_classes, patch_shape):
-    patch_h, patch_w = patch_shape
-    images = flat.reshape(flat.shape[0], channels, height, width)
-    patch = images[:, 0, :patch_h, :patch_w].reshape(flat.shape[0], -1)
-    return np.argmax(patch[:, :num_classes], axis=1)
+def decode_label_slot(flat, num_classes):
+    slot = flat[:, -num_classes:]
+    return np.argmax(slot, axis=1)
 
 
 def negentropy_feature_weights(X):
@@ -209,9 +183,11 @@ def top_pca_projection(Xtr, d):
 
 
 def reconstruct_for_plot(flat_state, mean, channels, height, width, inverse_scale=None):
-    state = flat_state.copy()
+    image_dim = mean.shape[1]
+    state = flat_state[:, :image_dim].copy()
     if inverse_scale is not None:
-        state = state / inverse_scale
+        scale = inverse_scale[:image_dim] if inverse_scale.shape[0] != image_dim else inverse_scale
+        state = state / scale
     state = state + mean
     state = state.reshape(state.shape[0], channels, height, width)
     if channels == 1:
@@ -264,13 +240,12 @@ def prepare_variant(dataset, variant, memory_count):
 
     if variant == "supervised-labelpatch":
         label_scale = 2.0
-        mem_raw, patch_shape = overwrite_label_patch(xtr[mem_idx], ytr[mem_idx], channels, height, width, label_scale)
-        xtr_query = zero_label_patch(xtr, channels, height, width, patch_shape)
-        xte_query = zero_label_patch(xte, channels, height, width, patch_shape)
+        mem_raw, num_classes = append_label_slot(xtr[mem_idx], ytr[mem_idx], label_scale)
+        xtr_query = zero_label_slot(xtr, num_classes)
+        xte_query = zero_label_slot(xte, num_classes)
         ridge_lambda = 0.0
         inverse_scale = None
         slot_meta = {
-            "patch_shape": patch_shape,
             "num_classes": num_classes,
         }
     elif variant == "unsupervised":
@@ -352,13 +327,9 @@ def run_variant(dataset_name, variant, memory_count, iterations, beta, plot_pref
     slot_acc = None
     slot_pred = None
     if prepared["slot_meta"] is not None:
-        slot_pred = decode_label_patch(
+        slot_pred = decode_label_slot(
             zte_state,
-            dataset["channels"],
-            dataset["height"],
-            dataset["width"],
             prepared["slot_meta"]["num_classes"],
-            prepared["slot_meta"]["patch_shape"],
         )
         slot_acc = float((slot_pred == yte).mean())
 
