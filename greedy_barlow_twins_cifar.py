@@ -173,7 +173,12 @@ def run_variant(
     xtr_img, ytr, xte_img, yte = dataset["xtr_img"], dataset["ytr"], dataset["xte_img"], dataset["yte"]
     xtr = dataset["xtr"]
     xte = dataset["xte"]
-    x1tr, x2tr = cifar_shared.sample_pair_views(xtr_img, suite_name, seed=SEED + 101, width=widths[0], repeats=1, mean=dataset["mean"])
+    if suite_name == "same-class":
+        x1tr, x2tr = cifar_shared.sample_same_class_pairs(xtr, ytr, seed=SEED + 101, repeats=1)
+    else:
+        x1tr, x2tr = cifar_shared.sample_pair_views(
+            xtr_img, suite_name, seed=SEED + 101, width=widths[0], repeats=1, mean=dataset["mean"]
+        )
 
     train_ds = TensorDataset(torch.from_numpy(x1tr).float(), torch.from_numpy(x2tr).float())
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True)

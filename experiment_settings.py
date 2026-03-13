@@ -1,7 +1,7 @@
 SEED = 7
 
 DATASETS = ["cifar10", "cifar100"]
-SUITES = ["random-crop", "crop-flip"]
+SUITES = ["random-affine", "random-crop", "same-class"]
 
 W = 512
 DEPTH = 3

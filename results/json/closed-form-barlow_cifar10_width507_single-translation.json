@@ -1,0 +1,27 @@
+{
+  "dataset": "cifar10",
+  "width": 507,
+  "suite": "single-translation",
+  "layer_method": "closed-form-barlow",
+  "layers": [
+    {
+      "layer": 1,
+      "classifier_accuracy": 0.393,
+      "train_prediction_loss": 0.4153324112796331,
+      "test_prediction_loss": 0.4534820326267776
+    },
+    {
+      "layer": 2,
+      "classifier_accuracy": 0.447,
+      "train_prediction_loss": 0.33041560518772756,
+      "test_prediction_loss": 0.39803420295013303
+    },
+    {
+      "layer": 3,
+      "classifier_accuracy": 0.445,
+      "train_prediction_loss": 0.31251882111145224,
+      "test_prediction_loss": 0.3969320405707453
+    }
+  ],
+  "classifier_accuracy": 0.445
+}

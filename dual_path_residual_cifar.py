@@ -301,8 +301,16 @@ def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_re
     yte = dataset["yte"]
     base_tr = dataset["xtr"]
     base_te = dataset["xte"]
-    view1_tr, view2_tr = cifar_shared.sample_pair_views(xtr_img, suite_name, seed=SEED + 13, width=width, repeats=aug_repeats, mean=dataset["mean"])
-    view1_te, view2_te = cifar_shared.sample_pair_views(xte_img, suite_name, seed=SEED + 31, width=width, repeats=1, mean=dataset["mean"])
+    if suite_name == "same-class":
+        view1_tr, view2_tr = cifar_shared.sample_same_class_pairs(base_tr, ytr, seed=SEED + 13, repeats=aug_repeats)
+        view1_te, view2_te = cifar_shared.sample_same_class_pairs(base_te, yte, seed=SEED + 31, repeats=1)
+    else:
+        view1_tr, view2_tr = cifar_shared.sample_pair_views(
+            xtr_img, suite_name, seed=SEED + 13, width=width, repeats=aug_repeats, mean=dataset["mean"]
+        )
+        view1_te, view2_te = cifar_shared.sample_pair_views(
+            xte_img, suite_name, seed=SEED + 31, width=width, repeats=1, mean=dataset["mean"]
+        )
 
     train_arrays, test_arrays = cfbt.normalize_hidden(
         [base_tr, view1_tr, view2_tr],

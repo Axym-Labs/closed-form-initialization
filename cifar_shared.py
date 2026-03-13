@@ -8,6 +8,11 @@ from torchvision import datasets
 SINGLE_TRANSLATION_DX = 3
 SINGLE_TRANSLATION_DY = 3
 BLOCK_GRID_SPLITS = 3
+RANDOM_TRANSLATION_MAX = 3
+RANDOM_AFFINE_MAX_DEG = 12.0
+RANDOM_AFFINE_MAX_SHIFT = 0.125
+RANDOM_AFFINE_MIN_SCALE = 0.9
+RANDOM_AFFINE_MAX_SCALE = 1.1
 
 
 def images_to_flat(images):
@@ -117,6 +122,34 @@ def _shift_images(images, dx, dy):
     return shifted
 
 
+def _random_small_translation(images, rng, max_shift=RANDOM_TRANSLATION_MAX):
+    shifted = np.empty_like(images)
+    dxs = rng.integers(-max_shift, max_shift + 1, size=images.shape[0])
+    dys = rng.integers(-max_shift, max_shift + 1, size=images.shape[0])
+    for i, (dx, dy) in enumerate(zip(dxs, dys)):
+        shifted[i] = _shift_images(images[i : i + 1], dx=int(dx), dy=int(dy))[0]
+    return shifted
+
+
+def _random_affine(images, rng):
+    n, _, h, w = images.shape
+    theta = np.zeros((n, 2, 3), dtype=np.float32)
+    for i in range(n):
+        angle = np.deg2rad(rng.uniform(-RANDOM_AFFINE_MAX_DEG, RANDOM_AFFINE_MAX_DEG))
+        scale = rng.uniform(RANDOM_AFFINE_MIN_SCALE, RANDOM_AFFINE_MAX_SCALE)
+        tx = rng.uniform(-RANDOM_AFFINE_MAX_SHIFT, RANDOM_AFFINE_MAX_SHIFT)
+        ty = rng.uniform(-RANDOM_AFFINE_MAX_SHIFT, RANDOM_AFFINE_MAX_SHIFT)
+        c = float(np.cos(angle) * scale)
+        s = float(np.sin(angle) * scale)
+        theta[i] = np.array([[c, -s, tx], [s, c, ty]], dtype=np.float32)
+
+    tensor = torch.from_numpy(images).float()
+    theta_t = torch.from_numpy(theta)
+    grid = F.affine_grid(theta_t, tensor.size(), align_corners=False)
+    warped = F.grid_sample(tensor, grid, mode="bilinear", padding_mode="zeros", align_corners=False)
+    return warped.numpy().astype(np.float64)
+
+
 def _grid_block_specs(num_splits, h, w):
     row_edges = np.linspace(0, h, num_splits + 1, dtype=int)
     col_edges = np.linspace(0, w, num_splits + 1, dtype=int)
@@ -165,6 +198,10 @@ def apply_augmentation(images, suite_name, rng):
         return _random_crop(images, rng)
     if suite_name == "crop-flip":
         return _horizontal_flip(_random_crop(images, rng), rng)
+    if suite_name == "random-small-translation":
+        return _random_small_translation(images, rng)
+    if suite_name == "random-affine":
+        return _random_affine(images, rng)
     if suite_name == "single-translation":
         return _shift_images(images, dx=SINGLE_TRANSLATION_DX, dy=SINGLE_TRANSLATION_DY)
     if suite_name == "block-masking":
@@ -172,6 +209,30 @@ def apply_augmentation(images, suite_name, rng):
         spec = specs[int(rng.integers(len(specs)))]
         return _block_mask_images(images, *spec)
     raise ValueError(f"Unsupported CIFAR suite: {suite_name}")
+
+
+def sample_same_class_pairs(X, y, seed, repeats=1):
+    rng = np.random.default_rng(seed)
+    class_to_indices = {}
+    for idx, label in enumerate(y):
+        class_to_indices.setdefault(int(label), []).append(idx)
+
+    left = []
+    right = []
+    for _ in range(repeats):
+        partner_idx = np.empty(X.shape[0], dtype=np.int64)
+        for idx, label in enumerate(y):
+            candidates = class_to_indices[int(label)]
+            if len(candidates) == 1:
+                partner_idx[idx] = candidates[0]
+                continue
+            chosen = idx
+            while chosen == idx:
+                chosen = candidates[int(rng.integers(len(candidates)))]
+            partner_idx[idx] = chosen
+        left.append(X.copy())
+        right.append(X[partner_idx])
+    return np.concatenate(left, axis=0), np.concatenate(right, axis=0)
 
 
 def sample_pair_views(images, suite_name, seed, width, repeats=1, mean=None):
@@ -202,6 +263,15 @@ def sample_pair_views(images, suite_name, seed, width, repeats=1, mean=None):
                     view1[mask1] = _apply_legacy_spec(centered_images[mask1], spec)
                 if np.any(mask2):
                     view2[mask2] = _apply_legacy_spec(centered_images[mask2], spec)
+        elif suite_name == "random-small-translation":
+            if mean is not None and images.shape[1] * images.shape[2] * images.shape[3] == mean.shape[1]:
+                centered_images = images - mean.reshape(1, images.shape[1], images.shape[2], images.shape[3])
+                mean_after_resize = None
+            else:
+                centered_images = images
+                mean_after_resize = mean
+            view1 = _random_small_translation(centered_images, rng)
+            view2 = _random_small_translation(centered_images, rng)
         else:
             view1 = apply_augmentation(images, suite_name, rng)
             view2 = apply_augmentation(images, suite_name, rng)
