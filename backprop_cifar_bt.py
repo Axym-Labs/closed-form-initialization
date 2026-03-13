@@ -10,19 +10,29 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 import closed_form_barlow_twins as cfbt
-import closed_form_barlow_twins_cifar as cfbt_cifar
+import cifar_shared
+from experiment_settings import (
+    ACTIVATION,
+    BACKPROP_EPOCHS,
+    BATCH_SIZE,
+    BT_USE_PROJECTOR,
+    DATASETS,
+    DEPTH,
+    LEARNING_RATE,
+    MOMENTUM,
+    N_TEST,
+    N_TRAIN,
+    SEED,
+    SUITES,
+    W,
+    WEIGHT_DECAY,
+)
 from project_paths import resolve_json_path
 
 
-SEED = 7
-WIDTHS = [256, 64, 32]
-BATCH_SIZE = 256
-EPOCHS = 100
-LR = 0.1
-MOMENTUM = 0.9
-WEIGHT_DECAY = 1e-4
+WIDTHS = [W] * DEPTH
+LR = LEARNING_RATE
 LAMBDA_OFFDIAG = 5e-3
-BT_WEIGHT = 0.1
 PROBE_MAX_ITER = 2000
 LEAKY_RELU_SLOPE = 0.1
 
@@ -63,14 +73,26 @@ def barlow_twins_loss(z1, z2, lambda_offdiag):
 
 
 class MLPClassifier(nn.Module):
-    def __init__(self, input_dim, widths, num_classes, activation):
+    def __init__(self, input_dim, widths, num_classes, activation, dual_mapping=False, bt_projector=False):
         super().__init__()
         dims = [input_dim] + list(widths)
         self.activation = activation
+        self.dual_mapping = dual_mapping
         self.hidden = nn.ModuleList(
             [nn.Linear(dims[i], dims[i + 1], bias=False) for i in range(len(widths))]
         )
         self.head = nn.Linear(widths[-1], num_classes, bias=True)
+        self.output_heads = None
+        if dual_mapping:
+            self.output_heads = nn.ModuleList([nn.Linear(w, num_classes, bias=True) for w in widths])
+        self.projector = None
+        if bt_projector:
+            self.projector = nn.Sequential(
+                nn.Linear(widths[-1], widths[-1], bias=False),
+                nn.BatchNorm1d(widths[-1]),
+                nn.ReLU(),
+                nn.Linear(widths[-1], widths[-1], bias=False),
+            )
 
     def encode(self, x):
         h = x
@@ -78,10 +100,28 @@ class MLPClassifier(nn.Module):
             h = apply_activation_torch(layer(h), self.activation)
         return h
 
+    def encode_upto(self, x, depth):
+        h = x
+        for layer_idx in range(depth):
+            h = apply_activation_torch(self.hidden[layer_idx](h), self.activation)
+        return h
+
     def forward(self, x):
         h = self.encode(x)
-        logits = self.head(h)
+        if self.dual_mapping:
+            logits = 0.0
+            prefix = x
+            for idx, layer in enumerate(self.hidden):
+                prefix = apply_activation_torch(layer(prefix), self.activation)
+                logits = logits + self.output_heads[idx](prefix)
+        else:
+            logits = self.head(h)
         return h, logits
+
+    def project(self, h):
+        if self.projector is None:
+            return h
+        return self.projector(h)
 
 
 def fit_linear_probe(ztr, ytr, zte, yte):
@@ -111,32 +151,61 @@ def evaluate(model, xtr, ytr, xte, yte, device):
     return probe_acc, classifier_acc
 
 
+def evaluate_across_depth(model, xtr, ytr, xte, yte, device):
+    depth_metrics = []
+    model.eval()
+    with torch.no_grad():
+        xtr_t = torch.from_numpy(xtr).float().to(device)
+        xte_t = torch.from_numpy(xte).float().to(device)
+        for depth in range(1, len(model.hidden) + 1):
+            ztr = model.encode_upto(xtr_t, depth).cpu().numpy()
+            zte = model.encode_upto(xte_t, depth).cpu().numpy()
+            ztr_std, zte_std = cfbt.standardize_train_test(ztr, zte)
+            probe_acc = fit_linear_probe(ztr_std, ytr, zte_std, yte)
+            depth_metrics.append(
+                {
+                    "depth": depth,
+                    "probe_accuracy": probe_acc,
+                }
+            )
+    return depth_metrics
+
+
 def run_experiment(
     dataset_name,
     suite_name,
     mode,
     widths,
     activation,
+    dual_mapping,
+    bt_projector,
     batch_size,
     epochs,
     lr,
     momentum,
     weight_decay,
     lambda_offdiag,
-    bt_weight,
     n_train,
     n_test,
 ):
     set_seed(SEED)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    xtr_img, ytr, xte_img, yte = cfbt_cifar.load_cifar_numpy(dataset_name, n_train=n_train, n_test=n_test, seed=SEED)
-    xtr = cfbt_cifar.images_to_flat(xtr_img)
-    xte = cfbt_cifar.images_to_flat(xte_img)
-    x1tr, x2tr = cfbt_cifar.sample_pair_views(xtr_img, suite_name, seed=SEED + 101)
+    dataset = cifar_shared.load_cifar_numpy(dataset_name, n_train=n_train, n_test=n_test, seed=SEED, width=widths[0])
+    xtr_img, ytr, xte_img, yte = dataset["xtr_img"], dataset["ytr"], dataset["xte_img"], dataset["yte"]
+    xtr = dataset["xtr"]
+    xte = dataset["xte"]
+    x1tr, x2tr = cifar_shared.sample_pair_views(xtr_img, suite_name, seed=SEED + 101, width=widths[0], repeats=1, mean=dataset["mean"])
 
     num_classes = int(max(np.max(ytr), np.max(yte)) + 1)
-    model = MLPClassifier(xtr.shape[1], widths, num_classes=num_classes, activation=activation).to(device)
+    model = MLPClassifier(
+        xtr.shape[1],
+        widths,
+        num_classes=num_classes,
+        activation=activation,
+        dual_mapping=dual_mapping and mode == "supervised",
+        bt_projector=bt_projector and mode == "barlow-twins",
+    ).to(device)
     optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
     ce_loss = nn.CrossEntropyLoss()
 
@@ -162,14 +231,18 @@ def run_experiment(
 
             feat_base, logits = model(xb)
             loss_sup = ce_loss(logits, yb)
-            loss = loss_sup
             loss_bt = torch.tensor(0.0, device=device)
-
-            if mode == "supervised+bt":
+            if mode == "supervised":
+                loss = loss_sup
+            elif mode == "barlow-twins":
                 feat1, _ = model(x1b)
                 feat2, _ = model(x2b)
-                loss_bt = barlow_twins_loss(feat1, feat2, lambda_offdiag=lambda_offdiag)
-                loss = loss_sup + bt_weight * loss_bt
+                proj1 = model.project(feat1)
+                proj2 = model.project(feat2)
+                loss_bt = barlow_twins_loss(proj1, proj2, lambda_offdiag=lambda_offdiag)
+                loss = loss_bt
+            else:
+                raise ValueError(f"Unknown mode: {mode}")
 
             optimizer.zero_grad()
             loss.backward()
@@ -188,44 +261,50 @@ def run_experiment(
         )
 
     probe_acc, classifier_acc = evaluate(model, xtr, ytr, xte, yte, device)
+    depth_metrics = evaluate_across_depth(model, xtr, ytr, xte, yte, device)
+    if mode == "barlow-twins":
+        classifier_acc = None
     return {
         "dataset": dataset_name,
         "suite": suite_name,
         "mode": mode,
         "activation": activation,
+        "dual_mapping": dual_mapping and mode == "supervised",
+        "bt_projector": bt_projector and mode == "barlow-twins",
         "widths": widths,
         "epochs": epochs,
         "n_train": n_train,
         "n_test": n_test,
         "probe_accuracy": probe_acc,
         "classifier_accuracy": classifier_acc,
+        "depth_metrics": depth_metrics,
         "epoch_stats": epoch_stats,
-        "bt_weight": bt_weight,
         "lambda_offdiag": lambda_offdiag,
         "device": str(device),
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="End-to-end supervised and supervised+BT MLP baselines on CIFAR.")
-    parser.add_argument("--dataset", choices=["cifar10", "cifar100"], default="cifar10")
-    parser.add_argument("--suite", default="single-translation", choices=["single-translation", "block-masking"])
-    parser.add_argument("--mode", choices=["supervised", "supervised+bt", "both"], default="both")
-    parser.add_argument("--activation", choices=["relu", "tanh", "leaky-relu", "identity"], default="relu")
+    parser = argparse.ArgumentParser(description="End-to-end supervised and Barlow Twins MLP baselines on CIFAR.")
+    parser.add_argument("--dataset", choices=DATASETS, default=DATASETS[0])
+    parser.add_argument("--suite", default=SUITES[0], choices=SUITES)
+    parser.add_argument("--mode", choices=["supervised", "barlow-twins", "both"], default="both")
+    parser.add_argument("--activation", choices=["relu", "tanh", "leaky-relu", "identity"], default=ACTIVATION)
     parser.add_argument("--widths", nargs="+", type=int, default=WIDTHS)
+    parser.add_argument("--dual-mapping", action="store_true")
+    parser.add_argument("--no-bt-projector", action="store_true")
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
-    parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--epochs", type=int, default=BACKPROP_EPOCHS)
     parser.add_argument("--lr", type=float, default=LR)
     parser.add_argument("--momentum", type=float, default=MOMENTUM)
     parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY)
     parser.add_argument("--lambda-offdiag", type=float, default=LAMBDA_OFFDIAG)
-    parser.add_argument("--bt-weight", type=float, default=BT_WEIGHT)
-    parser.add_argument("--n-train", type=int, default=cfbt_cifar.N_TRAIN)
-    parser.add_argument("--n-test", type=int, default=cfbt_cifar.N_TEST)
+    parser.add_argument("--n-train", type=int, default=N_TRAIN)
+    parser.add_argument("--n-test", type=int, default=N_TEST)
     parser.add_argument("--save-json", type=Path, default=None)
     args = parser.parse_args()
 
-    modes = ["supervised", "supervised+bt"] if args.mode == "both" else [args.mode]
+    modes = ["supervised", "barlow-twins"] if args.mode == "both" else [args.mode]
     results = []
     for mode in modes:
         results.append(
@@ -235,13 +314,14 @@ def main():
                 mode=mode,
                 widths=args.widths,
                 activation=args.activation,
+                dual_mapping=args.dual_mapping,
+                bt_projector=not args.no_bt_projector,
                 batch_size=args.batch_size,
                 epochs=args.epochs,
                 lr=args.lr,
                 momentum=args.momentum,
                 weight_decay=args.weight_decay,
                 lambda_offdiag=args.lambda_offdiag,
-                bt_weight=args.bt_weight,
                 n_train=args.n_train,
                 n_test=args.n_test,
             )
@@ -252,7 +332,7 @@ def main():
     )
     for result in results:
         print(
-            f"{result['mode']:>13s} | classifier acc = {result['classifier_accuracy']:.4f} | probe acc = {result['probe_accuracy']:.4f} | final total loss = {result['epoch_stats'][-1]['total_loss']:.4f}"
+            f"{result['mode']:>13s} | classifier acc = {result['classifier_accuracy'] if result['classifier_accuracy'] is not None else 'n/a'} | probe acc = {result['probe_accuracy']:.4f} | final total loss = {result['epoch_stats'][-1]['total_loss']:.4f}"
         )
 
     if args.save_json is not None:

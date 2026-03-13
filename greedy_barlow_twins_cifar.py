@@ -10,17 +10,27 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 import closed_form_barlow_twins as cfbt
-import closed_form_barlow_twins_cifar as cfbt_cifar
+import cifar_shared
+from experiment_settings import (
+    ACTIVATION,
+    BATCH_SIZE,
+    DATASETS,
+    DEPTH,
+    GREEDY_BT_EPOCHS,
+    LEARNING_RATE,
+    MOMENTUM,
+    N_TEST,
+    N_TRAIN,
+    SEED,
+    SUITES,
+    W,
+    WEIGHT_DECAY,
+)
 from project_paths import resolve_json_path
 
 
-SEED = 7
-WIDTHS = [256, 64, 32]
-BATCH_SIZE = 256
-EPOCHS = 8
-LR = 0.1
-MOMENTUM = 0.9
-WEIGHT_DECAY = 1e-4
+WIDTHS = [W] * DEPTH
+LR = LEARNING_RATE
 LAMBDA_OFFDIAG = 5e-3
 PROBE_MAX_ITER = 2000
 LEAKY_RELU_SLOPE = 0.1
@@ -80,6 +90,12 @@ class GreedyBarlowMLP(nn.Module):
         h = x
         for layer in self.layers:
             h = apply_activation_torch(layer(h), self.activation)
+        return h
+
+    def extract_features_upto(self, x, depth):
+        h = x
+        for layer_idx in range(depth):
+            h = apply_activation_torch(self.layers[layer_idx](h), self.activation)
         return h
 
 
@@ -153,10 +169,11 @@ def run_variant(
 ):
     set_seed(SEED)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    xtr_img, ytr, xte_img, yte = cfbt_cifar.load_cifar_numpy(dataset_name, n_train=n_train, n_test=n_test, seed=SEED)
-    xtr = cfbt_cifar.images_to_flat(xtr_img)
-    xte = cfbt_cifar.images_to_flat(xte_img)
-    x1tr, x2tr = cfbt_cifar.sample_pair_views(xtr_img, suite_name, seed=SEED + 101)
+    dataset = cifar_shared.load_cifar_numpy(dataset_name, n_train=n_train, n_test=n_test, seed=SEED, width=widths[0])
+    xtr_img, ytr, xte_img, yte = dataset["xtr_img"], dataset["ytr"], dataset["xte_img"], dataset["yte"]
+    xtr = dataset["xtr"]
+    xte = dataset["xte"]
+    x1tr, x2tr = cifar_shared.sample_pair_views(xtr_img, suite_name, seed=SEED + 101, width=widths[0], repeats=1, mean=dataset["mean"])
 
     train_ds = TensorDataset(torch.from_numpy(x1tr).float(), torch.from_numpy(x2tr).float())
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True)
@@ -176,21 +193,22 @@ def run_variant(
             weight_decay=weight_decay,
             lambda_offdiag=lambda_offdiag,
         )
+        model.eval()
+        with torch.no_grad():
+            ztr = model.extract_features_upto(torch.from_numpy(xtr).float().to(device), layer_idx + 1).cpu().numpy()
+            zte = model.extract_features_upto(torch.from_numpy(xte).float().to(device), layer_idx + 1).cpu().numpy()
+        ztr_std, zte_std = cfbt.standardize_train_test(ztr, zte)
+        probe_acc = fit_linear_probe(ztr_std, ytr, zte_std, yte)
         layer_stats.append(
             {
-                "layer": layer_idx + 1,
+                "depth": layer_idx + 1,
+                "probe_accuracy": probe_acc,
                 "final_epoch_loss": losses[-1],
                 "loss_curve": losses,
             }
         )
 
-    model.eval()
-    with torch.no_grad():
-        ztr = model.extract_features(torch.from_numpy(xtr).float().to(device)).cpu().numpy()
-        zte = model.extract_features(torch.from_numpy(xte).float().to(device)).cpu().numpy()
-
-    ztr, zte = cfbt.standardize_train_test(ztr, zte)
-    probe_acc = fit_linear_probe(ztr, ytr, zte, yte)
+    probe_acc = layer_stats[-1]["probe_accuracy"]
     return {
         "dataset": dataset_name,
         "suite": suite_name,
@@ -200,61 +218,57 @@ def run_variant(
         "n_train": n_train,
         "n_test": n_test,
         "probe_accuracy": probe_acc,
-        "layers": layer_stats,
+        "depth_metrics": layer_stats,
         "device": str(device),
     }
 
 
 def main():
     parser = argparse.ArgumentParser(description="Greedy layerwise Barlow Twins MLP on CIFAR.")
-    parser.add_argument("--dataset", choices=["cifar10", "cifar100"], default="cifar10")
-    parser.add_argument("--suite", default="single-translation", choices=["single-translation", "block-masking"])
+    parser.add_argument("--dataset", choices=DATASETS, default=DATASETS[0])
+    parser.add_argument("--suite", default=SUITES[0], choices=SUITES)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
-    parser.add_argument("--epochs", type=int, default=EPOCHS)
+    parser.add_argument("--epochs", type=int, default=GREEDY_BT_EPOCHS)
     parser.add_argument("--lr", type=float, default=LR)
     parser.add_argument("--momentum", type=float, default=MOMENTUM)
     parser.add_argument("--weight-decay", type=float, default=WEIGHT_DECAY)
     parser.add_argument("--lambda-offdiag", type=float, default=LAMBDA_OFFDIAG)
-    parser.add_argument("--activation", choices=["relu", "tanh", "leaky-relu", "identity"], default="relu")
+    parser.add_argument("--activation", choices=["relu", "tanh", "leaky-relu", "identity"], default=ACTIVATION)
     parser.add_argument("--widths", nargs="+", type=int, default=WIDTHS)
-    parser.add_argument("--loss-position", choices=["pre", "post", "both"], default="pre")
-    parser.add_argument("--n-train", type=int, default=cfbt_cifar.N_TRAIN)
-    parser.add_argument("--n-test", type=int, default=cfbt_cifar.N_TEST)
+    parser.add_argument("--loss-position", choices=["post"], default="post")
+    parser.add_argument("--n-train", type=int, default=N_TRAIN)
+    parser.add_argument("--n-test", type=int, default=N_TEST)
     parser.add_argument("--save-json", type=Path, default=None)
     args = parser.parse_args()
 
-    loss_positions = ["pre", "post"] if args.loss_position == "both" else [args.loss_position]
-    results = []
-    for loss_position in loss_positions:
-        results.append(
-            run_variant(
-                dataset_name=args.dataset,
-                suite_name=args.suite,
-                loss_position=loss_position,
-                widths=args.widths,
-                batch_size=args.batch_size,
-                epochs=args.epochs,
-                lr=args.lr,
-                momentum=args.momentum,
-                weight_decay=args.weight_decay,
-                lambda_offdiag=args.lambda_offdiag,
-                activation=args.activation,
-                n_train=args.n_train,
-                n_test=args.n_test,
-            )
-        )
+    result = run_variant(
+        dataset_name=args.dataset,
+        suite_name=args.suite,
+        loss_position="post",
+        widths=args.widths,
+        batch_size=args.batch_size,
+        epochs=args.epochs,
+        lr=args.lr,
+        momentum=args.momentum,
+        weight_decay=args.weight_decay,
+        lambda_offdiag=args.lambda_offdiag,
+        activation=args.activation,
+        n_train=args.n_train,
+        n_test=args.n_test,
+    )
 
     print(
         f"Greedy Barlow Twins CIFAR  |  dataset={args.dataset}  |  suite={args.suite}  |  activation={args.activation}  |  widths={args.widths}"
     )
-    for result in results:
-        print(f"{result['loss_position']:>4s} activation loss | probe accuracy = {result['probe_accuracy']:.4f}")
-        for layer in result["layers"]:
-            print(f"  layer {layer['layer']} final loss = {layer['final_epoch_loss']:.4f}")
+    print(f"{result['loss_position']:>4s} activation loss | probe accuracy = {result['probe_accuracy']:.4f}")
+    for layer in result["depth_metrics"]:
+        print(
+            f"  depth {layer['depth']} probe = {layer['probe_accuracy']:.4f} | final loss = {layer['final_epoch_loss']:.4f}"
+        )
 
     if args.save_json is not None:
         output_path = resolve_json_path(args.save_json)
-        output_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+        output_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(f"saved json to {output_path}")
 
 

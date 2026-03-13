@@ -5,23 +5,42 @@ from pathlib import Path
 import numpy as np
 
 import closed_form_barlow_twins as cfbt
-import closed_form_barlow_twins_cifar as cfbt_cifar
-from closed_form_supervised_residual import one_hot, ridge_regression, squared_prediction_loss
+import cifar_shared
+from experiment_settings import (
+    ACTIVATION,
+    ANALYTIC_AUG_REPEATS,
+    ANALYTIC_MODELS,
+    DATASETS,
+    DEPTH,
+    HEAD_REG,
+    LAMBDA_REG,
+    N_TEST,
+    N_TRAIN,
+    SUITES,
+    W,
+)
 from project_paths import default_json_path, resolve_json_path
 
 
 SEED = 7
-N_TRAIN = 6000
-N_TEST = 1000
-DEPTH = 3
-WIDTH = 512
-HEAD_REG = 100.0
-LAMBDA_REG = 1.0
-ACTIVATION = "relu"
 
-LAYER_METHODS = ["pca", "random"] + cfbt_cifar.LAYER_METHODS
-SUITES = ["single-translation", "block-masking"]
-DATASETS = ["cifar10", "cifar100"]
+LAYER_METHODS = ["pca", "random"] + ANALYTIC_MODELS
+
+
+def one_hot(y, num_classes):
+    eye = np.eye(num_classes, dtype=np.float64)
+    return eye[y]
+
+
+def ridge_regression(X, Y, reg):
+    gram = X.T @ X
+    rhs = X.T @ Y
+    return np.linalg.solve(gram + reg * np.eye(gram.shape[0], dtype=np.float64), rhs)
+
+
+def squared_prediction_loss(pred, target):
+    residual = target - pred
+    return float(0.5 * np.mean(np.sum(residual * residual, axis=1)))
 
 
 def fit_pca_basis(X, width):
@@ -77,6 +96,50 @@ def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, l
                 "rank": int(transform.shape[1]),
             },
         }
+
+    # The original depth-gain runs used the full square closed-form transforms when
+    # the hidden width matched the ambient feature dimension. Preserve that path
+    # exactly so full-width reruns remain comparable to the historical results.
+    if width >= current_dim:
+        if method_name == "closed-form-barlow":
+            model = cfbt.fit_layer(view1_tr, view2_tr, lambda_reg=lambda_reg)
+        elif method_name == "iterref-old":
+            model = cfbt.fit_iterref_old_from_pairs(view1_tr, view2_tr, lambda_reg=lambda_reg)
+        elif method_name in {"iterref-symcca", "residual-barlow"}:
+            model = cfbt.fit_residual_barlow_from_pairs(view1_tr, view2_tr, lambda_reg=lambda_reg)
+        elif method_name == "whitened-shared-pca":
+            model = cfbt.fit_whitened_shared_pca_from_pairs(view1_tr, view2_tr)
+        elif method_name == "paper-cca":
+            model = cfbt.fit_paper_cca_from_pairs(view1_tr, view2_tr)
+        elif method_name == "paper-cca-shared":
+            model = cfbt.fit_paper_cca_shared_from_pairs(view1_tr, view2_tr)
+        else:
+            model = None
+
+        if model is not None:
+            return {
+                "transform_base": model["transform_base"],
+                "transform_view1": model["transform_view1"],
+                "transform_view2": model["transform_view2"],
+                "method_stats": {
+                    "method": method_name,
+                    "rank": int(model["transform_base"].shape[1]),
+                    "top_score": float("nan"),
+                    "bottom_score": float("nan"),
+                    "rank_variant": "full-transform",
+                    "distance_to_identity": model["distance_to_identity"],
+                    "distance_to_whitened_identity": model["distance_to_whitened_identity"],
+                    "transform_fro": model["transform_fro"],
+                    "max_whitened_delta": model.get("max_whitened_delta"),
+                    "min_whitened_delta": model.get("min_whitened_delta"),
+                    "max_shared_eigenvalue": model.get("max_shared_eigenvalue"),
+                    "min_shared_eigenvalue": model.get("min_shared_eigenvalue"),
+                    "max_residual_gain": model.get("max_residual_gain"),
+                    "min_residual_gain": model.get("min_residual_gain"),
+                    "max_canonical_correlation": model.get("max_canonical_correlation"),
+                    "min_canonical_correlation": model.get("min_canonical_correlation"),
+                },
+            }
 
     stats = cfbt.compute_paired_stats(view1_tr, view2_tr)
     sigma_bar = stats["sigma_bar"]
@@ -221,20 +284,25 @@ def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, l
 
 def hidden_probe_accuracy(Htr, ytr, Hte, yte):
     ztr, zte = cfbt.standardize_train_test(Htr, Hte)
-    return cfbt_cifar.fit_linear_probe(ztr, ytr, zte, yte)
+    return cfbt.fit_linear_probe(ztr, ytr, zte, yte)
 
 
-def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_reg, lambda_reg, activation):
-    xtr_img, ytr, xte_img, yte = cfbt_cifar.load_cifar_numpy(
+def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_reg, lambda_reg, activation, aug_repeats, dual_mapping=False):
+    dataset = cifar_shared.load_cifar_numpy(
         dataset_name,
         n_train=N_TRAIN,
         n_test=N_TEST,
         seed=SEED,
+        width=width,
     )
-    base_tr = cfbt_cifar.images_to_flat(xtr_img)
-    base_te = cfbt_cifar.images_to_flat(xte_img)
-    view1_tr, view2_tr = cfbt_cifar.sample_pair_views(xtr_img, suite_name, seed=SEED + 13)
-    view1_te, view2_te = cfbt_cifar.sample_pair_views(xte_img, suite_name, seed=SEED + 31)
+    xtr_img = dataset["xtr_img"]
+    xte_img = dataset["xte_img"]
+    ytr = dataset["ytr"]
+    yte = dataset["yte"]
+    base_tr = dataset["xtr"]
+    base_te = dataset["xte"]
+    view1_tr, view2_tr = cifar_shared.sample_pair_views(xtr_img, suite_name, seed=SEED + 13, width=width, repeats=aug_repeats, mean=dataset["mean"])
+    view1_te, view2_te = cifar_shared.sample_pair_views(xte_img, suite_name, seed=SEED + 31, width=width, repeats=1, mean=dataset["mean"])
 
     train_arrays, test_arrays = cfbt.normalize_hidden(
         [base_tr, view1_tr, view2_tr],
@@ -254,16 +322,15 @@ def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_re
     activation_param_count = 0
 
     for layer_idx in range(depth):
-        output_map = ridge_regression(base_tr, ytr_onehot - yhat_tr, reg=head_reg)
-        output_param_count += int(output_map.size)
-
-        yhat_tr = yhat_tr + base_tr @ output_map
-        yhat_te = yhat_te + base_te @ output_map
-
-        layer_acc = float((np.argmax(yhat_te, axis=1) == yte).mean())
-        layer_train_loss = squared_prediction_loss(yhat_tr, ytr_onehot)
-        layer_test_loss = squared_prediction_loss(yhat_te, yte_onehot)
-        layer_hidden_probe = hidden_probe_accuracy(base_tr, ytr, base_te, yte)
+        if dual_mapping:
+            output_map = ridge_regression(base_tr, ytr_onehot - yhat_tr, reg=head_reg)
+            output_param_count += int(output_map.size)
+            yhat_tr = yhat_tr + base_tr @ output_map
+            yhat_te = yhat_te + base_te @ output_map
+            layer_acc = float((np.argmax(yhat_te, axis=1) == yte).mean())
+            layer_train_loss = squared_prediction_loss(yhat_tr, ytr_onehot)
+            layer_test_loss = squared_prediction_loss(yhat_te, yte_onehot)
+            layer_hidden_probe = hidden_probe_accuracy(base_tr, ytr, base_te, yte)
 
         fitted = fit_activation_transforms(
             method_name=layer_method,
@@ -290,6 +357,16 @@ def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_re
         base_tr, view1_tr, view2_tr = train_arrays
         base_te, view1_te, view2_te = test_arrays
 
+        if not dual_mapping:
+            output_map = ridge_regression(base_tr, ytr_onehot, reg=head_reg)
+            output_param_count = int(output_map.size)
+            logits_tr = base_tr @ output_map
+            logits_te = base_te @ output_map
+            layer_acc = float((np.argmax(logits_te, axis=1) == yte).mean())
+            layer_train_loss = squared_prediction_loss(logits_tr, ytr_onehot)
+            layer_test_loss = squared_prediction_loss(logits_te, yte_onehot)
+            layer_hidden_probe = hidden_probe_accuracy(base_tr, ytr, base_te, yte)
+
         post_stats = cfbt.compute_paired_stats(view1_tr, view2_tr)
         layers.append(
             {
@@ -306,20 +383,30 @@ def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_re
         )
 
     final_hidden_probe = hidden_probe_accuracy(base_tr, ytr, base_te, yte)
+    if dual_mapping:
+        final_classifier_acc = float((np.argmax(yhat_te, axis=1) == yte).mean())
+        final_train_loss = squared_prediction_loss(yhat_tr, ytr_onehot)
+        final_test_loss = squared_prediction_loss(yhat_te, yte_onehot)
+    else:
+        final_classifier_acc = layers[-1]["classifier_accuracy"]
+        final_train_loss = layers[-1]["train_prediction_loss"]
+        final_test_loss = layers[-1]["test_prediction_loss"]
     results = {
         "dataset": dataset_name,
         "suite": suite_name,
         "layer_method": layer_method,
+        "dual_mapping": dual_mapping,
         "activation": activation,
         "width": width,
         "depth": depth,
+        "augment_repeats": aug_repeats,
         "head_reg": head_reg,
         "lambda_reg": lambda_reg,
         "n_train": N_TRAIN,
         "n_test": N_TEST,
-        "classifier_accuracy": float((np.argmax(yhat_te, axis=1) == yte).mean()),
-        "train_prediction_loss": squared_prediction_loss(yhat_tr, ytr_onehot),
-        "test_prediction_loss": squared_prediction_loss(yhat_te, yte_onehot),
+        "classifier_accuracy": final_classifier_acc,
+        "train_prediction_loss": final_train_loss,
+        "test_prediction_loss": final_test_loss,
         "final_hidden_probe_accuracy": final_hidden_probe,
         "layers": layers,
         "output_param_count": output_param_count,
@@ -329,7 +416,7 @@ def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_re
     return results
 
 
-def run_sweep(datasets, suites, methods, width, depth, head_reg, lambda_reg, activation):
+def run_sweep(datasets, suites, methods, width, depth, head_reg, lambda_reg, activation, aug_repeats, dual_mapping=False):
     all_results = []
     for dataset_name in datasets:
         for suite_name in suites:
@@ -344,6 +431,8 @@ def run_sweep(datasets, suites, methods, width, depth, head_reg, lambda_reg, act
                         head_reg=head_reg,
                         lambda_reg=lambda_reg,
                         activation=activation,
+                        aug_repeats=aug_repeats,
+                        dual_mapping=dual_mapping,
                     )
                 )
     return all_results
@@ -359,6 +448,8 @@ def main():
     parser.add_argument("--head-reg", type=float, default=HEAD_REG)
     parser.add_argument("--lambda-reg", type=float, default=LAMBDA_REG)
     parser.add_argument("--activation", type=str, default=ACTIVATION)
+    parser.add_argument("--augment-repeats", type=int, default=ANALYTIC_AUG_REPEATS)
+    parser.add_argument("--dual-mapping", action="store_true")
     parser.add_argument("--json-out", type=Path, default=None)
     args = parser.parse_args()
 
@@ -375,6 +466,8 @@ def main():
         head_reg=args.head_reg,
         lambda_reg=args.lambda_reg,
         activation=args.activation,
+        aug_repeats=args.augment_repeats,
+        dual_mapping=args.dual_mapping,
     )
 
     summary = {
@@ -384,9 +477,11 @@ def main():
             "methods": methods,
             "width": args.width,
             "depth": args.depth,
+            "augment_repeats": args.augment_repeats,
             "head_reg": args.head_reg,
             "lambda_reg": args.lambda_reg,
             "activation": args.activation,
+            "dual_mapping": args.dual_mapping,
         },
         "results": results,
     }
