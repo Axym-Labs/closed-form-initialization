@@ -1,0 +1,106 @@
+{
+  "config": {
+    "datasets": [
+      "cifar10"
+    ],
+    "suites": [
+      "random-affine"
+    ],
+    "methods": [
+      "supervised-prototype-attention"
+    ],
+    "width": 507,
+    "depth": 3,
+    "augment_repeats": 2,
+    "head_reg": 100.0,
+    "lambda_reg": 1.0,
+    "activation": "relu",
+    "dual_mapping": true,
+    "output_source": "pre-hidden",
+    "center_after_hidden": false
+  },
+  "results": [
+    {
+      "dataset": "cifar10",
+      "suite": "random-affine",
+      "layer_method": "supervised-prototype-attention",
+      "dual_mapping": true,
+      "activation": "relu",
+      "width": 507,
+      "depth": 3,
+      "augment_repeats": 2,
+      "head_reg": 100.0,
+      "lambda_reg": 1.0,
+      "output_source": "pre-hidden",
+      "center_after_hidden": false,
+      "n_train": 6000,
+      "n_test": 1000,
+      "classifier_accuracy": 0.359,
+      "train_prediction_loss": 0.3270178413101229,
+      "test_prediction_loss": 0.41631428829256584,
+      "final_hidden_probe_accuracy": 0.336,
+      "layers": [
+        {
+          "layer": 1,
+          "classifier_accuracy": 0.386,
+          "train_prediction_loss": 0.3764476458993478,
+          "test_prediction_loss": 0.41308723591330193,
+          "hidden_probe_accuracy": 0.344,
+          "post_delta_trace": 112.55453400704278,
+          "post_shared_trace": 116.36040781108436,
+          "base_trace": 188.11036397340712,
+          "method": "supervised-prototype-attention",
+          "rank": 10,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "prototype-attention",
+          "token_count": 1,
+          "token_dim": 507,
+          "shared_trace": NaN,
+          "delta_trace": NaN
+        },
+        {
+          "layer": 2,
+          "classifier_accuracy": 0.365,
+          "train_prediction_loss": 0.34427461722563224,
+          "test_prediction_loss": 0.4131374219140032,
+          "hidden_probe_accuracy": 0.344,
+          "post_delta_trace": 183.94515141074464,
+          "post_shared_trace": 131.28493521656839,
+          "base_trace": 240.2383766920642,
+          "method": "supervised-prototype-attention",
+          "rank": 10,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "prototype-attention",
+          "token_count": 1,
+          "token_dim": 507,
+          "shared_trace": NaN,
+          "delta_trace": NaN
+        },
+        {
+          "layer": 3,
+          "classifier_accuracy": 0.359,
+          "train_prediction_loss": 0.3270178413101229,
+          "test_prediction_loss": 0.41631428829256584,
+          "hidden_probe_accuracy": 0.332,
+          "post_delta_trace": 278.0220663985557,
+          "post_shared_trace": 150.6106581232538,
+          "base_trace": 328.8795626448667,
+          "method": "supervised-prototype-attention",
+          "rank": 10,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "prototype-attention",
+          "token_count": 1,
+          "token_dim": 507,
+          "shared_trace": NaN,
+          "delta_trace": NaN
+        }
+      ],
+      "output_param_count": 15210,
+      "activation_param_count": 801567,
+      "total_parameter_count": 816777
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "config": {
+    "dataset": "cifar100",
+    "suite": "random-affine",
+    "patch_size": 8,
+    "depth": 3,
+    "n_train": 10000,
+    "n_test": 2000,
+    "vit_epochs": 20
+  },
+  "results": [
+    {
+      "model": "closed-form-transformer",
+      "dataset": "cifar100",
+      "suite": "random-affine",
+      "patch_size": 8,
+      "model_dim": 192,
+      "depth": 3,
+      "n_train": 10000,
+      "n_test": 2000,
+      "classifier_accuracy": 0.119,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.059
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.1045
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.119
+        }
+      ],
+      "output_param_count": 57600,
+      "hidden_param_count": 230400,
+      "total_parameter_count": 288000,
+      "fit_time_sec": 22.14202379999915
+    },
+    {
+      "model": "basic-vit",
+      "dataset": "cifar100",
+      "suite": "random-affine",
+      "patch_size": 8,
+      "model_dim": 192,
+      "depth": 3,
+      "n_train": 10000,
+      "n_test": 2000,
+      "classifier_accuracy": 0.215,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.083
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.17
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.215
+        }
+      ],
+      "total_parameter_count": 951268,
+      "fit_time_sec": 72.54375669999718,
+      "epoch_stats": [
+        {
+          "loss": 4.403109288215637
+        },
+        {
+          "loss": 4.110307896137238
+        },
+        {
+          "loss": 3.949043166637421
+        },
+        {
+          "loss": 3.8393188655376433
+        },
+        {
+          "loss": 3.7627882599830627
+        },
+        {
+          "loss": 3.6602173328399656
+        },
+        {
+          "loss": 3.58256613612175
+        },
+        {
+          "loss": 3.513295125961304
+        },
+        {
+          "loss": 3.458646160364151
+        },
+        {
+          "loss": 3.393863171339035
+        },
+        {
+          "loss": 3.3303494453430176
+        },
+        {
+          "loss": 3.255643230676651
+        },
+        {
+          "loss": 3.206453150510788
+        },
+        {
+          "loss": 3.157906711101532
+        },
+        {
+          "loss": 3.1076621651649474
+        },
+        {
+          "loss": 3.087125873565674
+        },
+        {
+          "loss": 3.017117089033127
+        },
+        {
+          "loss": 2.9634277701377867
+        },
+        {
+          "loss": 2.9271434366703035
+        },
+        {
+          "loss": 2.901370978355408
+        }
+      ],
+      "device": "cpu"
+    }
+  ]
+}

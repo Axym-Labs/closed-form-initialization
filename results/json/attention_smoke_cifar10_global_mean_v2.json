@@ -1,0 +1,106 @@
+{
+  "config": {
+    "datasets": [
+      "cifar10"
+    ],
+    "suites": [
+      "random-affine"
+    ],
+    "methods": [
+      "global-attention-mean"
+    ],
+    "width": 507,
+    "depth": 3,
+    "augment_repeats": 2,
+    "head_reg": 100.0,
+    "lambda_reg": 1.0,
+    "activation": "relu",
+    "dual_mapping": true,
+    "output_source": "pre-hidden",
+    "center_after_hidden": false
+  },
+  "results": [
+    {
+      "dataset": "cifar10",
+      "suite": "random-affine",
+      "layer_method": "global-attention-mean",
+      "dual_mapping": true,
+      "activation": "relu",
+      "width": 507,
+      "depth": 3,
+      "augment_repeats": 2,
+      "head_reg": 100.0,
+      "lambda_reg": 1.0,
+      "output_source": "pre-hidden",
+      "center_after_hidden": false,
+      "n_train": 6000,
+      "n_test": 1000,
+      "classifier_accuracy": 0.361,
+      "train_prediction_loss": 0.34854844772240845,
+      "test_prediction_loss": 0.42739935654391387,
+      "final_hidden_probe_accuracy": 0.258,
+      "layers": [
+        {
+          "layer": 1,
+          "classifier_accuracy": 0.386,
+          "train_prediction_loss": 0.3764476458993478,
+          "test_prediction_loss": 0.41308723591330193,
+          "hidden_probe_accuracy": 0.344,
+          "post_delta_trace": 291.4378499939253,
+          "post_shared_trace": 334.02690467817047,
+          "base_trace": 556.6922940537837,
+          "method": "global-attention-mean",
+          "rank": 64,
+          "top_score": 0.9970193156950905,
+          "bottom_score": 0.5529967677803953,
+          "rank_variant": "global-attention",
+          "token_count": 1,
+          "token_dim": 507,
+          "shared_trace": 334.5230857959183,
+          "delta_trace": 329.36413076090514
+        },
+        {
+          "layer": 2,
+          "classifier_accuracy": 0.377,
+          "train_prediction_loss": 0.3576970587301152,
+          "test_prediction_loss": 0.41914668618503964,
+          "hidden_probe_accuracy": 0.316,
+          "post_delta_trace": 290.25327247049387,
+          "post_shared_trace": 328.29711376338264,
+          "base_trace": 570.3720720009194,
+          "method": "global-attention-mean",
+          "rank": 64,
+          "top_score": 0.995646764013989,
+          "bottom_score": 0.5337284136799225,
+          "rank_variant": "global-attention",
+          "token_count": 1,
+          "token_dim": 507,
+          "shared_trace": 334.02690467817047,
+          "delta_trace": 291.4378499939253
+        },
+        {
+          "layer": 3,
+          "classifier_accuracy": 0.361,
+          "train_prediction_loss": 0.34854844772240845,
+          "test_prediction_loss": 0.42739935654391387,
+          "hidden_probe_accuracy": 0.287,
+          "post_delta_trace": 291.609624515916,
+          "post_shared_trace": 323.6752287469436,
+          "base_trace": 578.804739873003,
+          "method": "global-attention-mean",
+          "rank": 64,
+          "top_score": 0.9951048218823904,
+          "bottom_score": 0.5349718401965282,
+          "rank_variant": "global-attention",
+          "token_count": 1,
+          "token_dim": 507,
+          "shared_trace": 328.29711376338264,
+          "delta_trace": 290.25327247049387
+        }
+      ],
+      "output_param_count": 15210,
+      "activation_param_count": 965835,
+      "total_parameter_count": 981045
+    }
+  ]
+}

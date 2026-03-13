@@ -1,0 +1,106 @@
+{
+  "config": {
+    "datasets": [
+      "cifar10"
+    ],
+    "suites": [
+      "random-affine"
+    ],
+    "methods": [
+      "memory-attention-residual"
+    ],
+    "width": 507,
+    "depth": 3,
+    "augment_repeats": 2,
+    "head_reg": 100.0,
+    "lambda_reg": 1.0,
+    "activation": "relu",
+    "dual_mapping": true,
+    "output_source": "pre-hidden",
+    "center_after_hidden": false
+  },
+  "results": [
+    {
+      "dataset": "cifar10",
+      "suite": "random-affine",
+      "layer_method": "memory-attention-residual",
+      "dual_mapping": true,
+      "activation": "relu",
+      "width": 507,
+      "depth": 3,
+      "augment_repeats": 2,
+      "head_reg": 100.0,
+      "lambda_reg": 1.0,
+      "output_source": "pre-hidden",
+      "center_after_hidden": false,
+      "n_train": 6000,
+      "n_test": 1000,
+      "classifier_accuracy": 0.362,
+      "train_prediction_loss": 0.34870339203554407,
+      "test_prediction_loss": 0.42744359359792833,
+      "final_hidden_probe_accuracy": 0.262,
+      "layers": [
+        {
+          "layer": 1,
+          "classifier_accuracy": 0.386,
+          "train_prediction_loss": 0.3764476458993478,
+          "test_prediction_loss": 0.41308723591330193,
+          "hidden_probe_accuracy": 0.344,
+          "post_delta_trace": 292.53805346493084,
+          "post_shared_trace": 333.92580965475577,
+          "base_trace": 555.6788238308116,
+          "method": "memory-attention-residual",
+          "rank": 0,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "memory-attention",
+          "token_count": 256,
+          "token_dim": 507,
+          "shared_trace": 334.5230857959183,
+          "delta_trace": 329.36413076090514
+        },
+        {
+          "layer": 2,
+          "classifier_accuracy": 0.373,
+          "train_prediction_loss": 0.3578028771174412,
+          "test_prediction_loss": 0.41920644131849927,
+          "hidden_probe_accuracy": 0.321,
+          "post_delta_trace": 291.3882120028972,
+          "post_shared_trace": 328.1633380508407,
+          "base_trace": 569.4041744738307,
+          "method": "memory-attention-residual",
+          "rank": 0,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "memory-attention",
+          "token_count": 256,
+          "token_dim": 507,
+          "shared_trace": 333.92580965475577,
+          "delta_trace": 292.53805346493084
+        },
+        {
+          "layer": 3,
+          "classifier_accuracy": 0.362,
+          "train_prediction_loss": 0.34870339203554407,
+          "test_prediction_loss": 0.42744359359792833,
+          "hidden_probe_accuracy": 0.287,
+          "post_delta_trace": 292.9418975846818,
+          "post_shared_trace": 323.4600738408907,
+          "base_trace": 577.8159145733433,
+          "method": "memory-attention-residual",
+          "rank": 0,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "memory-attention",
+          "token_count": 256,
+          "token_dim": 507,
+          "shared_trace": 328.1633380508407,
+          "delta_trace": 291.3882120028972
+        }
+      ],
+      "output_param_count": 15210,
+      "activation_param_count": 1549899,
+      "total_parameter_count": 1565109
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "config": {
+    "dataset": "cifar100",
+    "suite": "random-affine",
+    "patch_size": 8,
+    "depth": 3,
+    "n_train": 4000,
+    "n_test": 1000,
+    "batch_size": 128,
+    "epochs": 20,
+    "lr": 0.0003,
+    "weight_decay": 0.05,
+    "head_reg": 100.0,
+    "lambda_reg": 1.0,
+    "num_landmarks": 8,
+    "num_heads": 4,
+    "analytic_num_heads": 2,
+    "mlp_ratio": 2.0,
+    "attention_kind": "landmark",
+    "attention_target": "mean",
+    "attention_rank": 0,
+    "local_sigma": 1.5,
+    "seed": 7,
+    "image_size": 32,
+    "in_chans": 3
+  },
+  "attention_kinds": [
+    "spectral-bt-context-centered"
+  ],
+  "results": [
+    {
+      "model": "closed-form-transformer:spectral-bt-context-centered",
+      "config": {
+        "dataset": "cifar100",
+        "suite": "random-affine",
+        "patch_size": 8,
+        "depth": 3,
+        "n_train": 4000,
+        "n_test": 1000,
+        "batch_size": 128,
+        "epochs": 20,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "head_reg": 100.0,
+        "lambda_reg": 1.0,
+        "num_landmarks": 8,
+        "num_heads": 4,
+        "analytic_num_heads": 2,
+        "mlp_ratio": 2.0,
+        "attention_kind": "spectral-bt-context-centered",
+        "attention_target": "mean",
+        "attention_rank": 0,
+        "local_sigma": 1.5,
+        "seed": 7,
+        "image_size": 32,
+        "in_chans": 3
+      },
+      "classifier_accuracy": 0.097,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.049,
+          "attention_kind": "spectral-bt-context-centered",
+          "attention_rank": 16,
+          "attention_mix_scale": 0.0,
+          "top_shared_eigenvalue": 0.9998604869478057
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.084,
+          "attention_kind": "spectral-bt-context-centered",
+          "attention_rank": 16,
+          "attention_mix_scale": 0.0,
+          "top_shared_eigenvalue": 0.9959613131330914
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.097,
+          "attention_kind": "spectral-bt-context-centered",
+          "attention_rank": 16,
+          "attention_mix_scale": 0.0,
+          "top_shared_eigenvalue": 0.9940983322426579
+        }
+      ],
+      "output_param_count": 57600,
+      "hidden_param_count": 340992,
+      "total_parameter_count": 398592,
+      "fit_time_sec": 19.34680340000341
+    }
+  ]
+}

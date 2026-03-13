@@ -1,0 +1,171 @@
+{
+  "config": {
+    "dataset": "cifar100",
+    "suite": "random-affine",
+    "patch_size": 8,
+    "depth": 3,
+    "n_train": 10000,
+    "n_test": 2000,
+    "batch_size": 256,
+    "epochs": 20,
+    "lr": 0.0003,
+    "weight_decay": 0.05,
+    "head_reg": 100.0,
+    "lambda_reg": 1.0,
+    "num_landmarks": 192,
+    "num_heads": 4,
+    "mlp_ratio": 2.0,
+    "seed": 7,
+    "image_size": 32,
+    "in_chans": 3
+  },
+  "results": [
+    {
+      "model": "closed-form-transformer",
+      "config": {
+        "dataset": "cifar100",
+        "suite": "random-affine",
+        "patch_size": 8,
+        "depth": 3,
+        "n_train": 10000,
+        "n_test": 2000,
+        "batch_size": 256,
+        "epochs": 20,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "head_reg": 100.0,
+        "lambda_reg": 1.0,
+        "num_landmarks": 192,
+        "num_heads": 4,
+        "mlp_ratio": 2.0,
+        "seed": 7,
+        "image_size": 32,
+        "in_chans": 3
+      },
+      "classifier_accuracy": 0.1265,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.059
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.1105
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.1265
+        }
+      ],
+      "output_param_count": 57600,
+      "hidden_param_count": 442368,
+      "total_parameter_count": 499968,
+      "fit_time_sec": 45.07554940000409
+    },
+    {
+      "model": "learned-transformer",
+      "config": {
+        "dataset": "cifar100",
+        "suite": "random-affine",
+        "patch_size": 8,
+        "depth": 3,
+        "n_train": 10000,
+        "n_test": 2000,
+        "batch_size": 256,
+        "epochs": 20,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "head_reg": 100.0,
+        "lambda_reg": 1.0,
+        "num_landmarks": 192,
+        "num_heads": 4,
+        "mlp_ratio": 2.0,
+        "seed": 7,
+        "image_size": 32,
+        "in_chans": 3
+      },
+      "classifier_accuracy": 0.197,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.156
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.1885
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.197
+        }
+      ],
+      "output_param_count": 57900,
+      "hidden_param_count": 891072,
+      "total_parameter_count": 948972,
+      "fit_time_sec": 103.55841440000222,
+      "epoch_stats": [
+        {
+          "loss": 4.569229698181152
+        },
+        {
+          "loss": 4.314763963222504
+        },
+        {
+          "loss": 4.156954908370972
+        },
+        {
+          "loss": 4.034946924448013
+        },
+        {
+          "loss": 3.958175057172775
+        },
+        {
+          "loss": 3.918245607614517
+        },
+        {
+          "loss": 3.8372498571872713
+        },
+        {
+          "loss": 3.778798520565033
+        },
+        {
+          "loss": 3.7363386392593383
+        },
+        {
+          "loss": 3.6833303809165954
+        },
+        {
+          "loss": 3.652050232887268
+        },
+        {
+          "loss": 3.596683418750763
+        },
+        {
+          "loss": 3.5798618495464325
+        },
+        {
+          "loss": 3.5529905259609222
+        },
+        {
+          "loss": 3.5154651045799254
+        },
+        {
+          "loss": 3.48658372759819
+        },
+        {
+          "loss": 3.4576694548130034
+        },
+        {
+          "loss": 3.4144723236560823
+        },
+        {
+          "loss": 3.4163496851921082
+        },
+        {
+          "loss": 3.36489737033844
+        }
+      ],
+      "device": "cpu"
+    }
+  ]
+}

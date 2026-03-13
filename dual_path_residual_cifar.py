@@ -5,17 +5,20 @@ from pathlib import Path
 import numpy as np
 
 import closed_form_barlow_twins as cfbt
+import closed_form_attention as cfatt
 import cifar_shared
 from experiment_settings import (
     ACTIVATION,
     ANALYTIC_AUG_REPEATS,
     ANALYTIC_MODELS,
+    CENTER_AFTER_HIDDEN,
     DATASETS,
     DEPTH,
     HEAD_REG,
     LAMBDA_REG,
     N_TEST,
     N_TRAIN,
+    OUTPUT_SOURCE,
     SUITES,
     W,
 )
@@ -24,7 +27,19 @@ from project_paths import default_json_path, resolve_json_path
 
 SEED = 7
 
-LAYER_METHODS = ["pca", "random"] + ANALYTIC_MODELS
+ATTENTION_MODELS = [
+    "landmark-attention-residual",
+    "landmark-attention-mean",
+    "axial-attention-residual",
+    "axial-attention-mean",
+    "global-attention-residual",
+    "global-attention-mean",
+    "memory-attention-residual",
+    "memory-attention-mean",
+    "supervised-prototype-attention",
+]
+
+LAYER_METHODS = ["pca", "random"] + ANALYTIC_MODELS + ATTENTION_MODELS
 
 
 def one_hot(y, num_classes):
@@ -67,13 +82,14 @@ def topk_columns(matrix, scores, width, descending=True):
     return matrix[:, keep], np.asarray(scores)[keep]
 
 
-def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, lambda_reg, layer_seed):
+def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, lambda_reg, layer_seed, ytr=None):
     current_dim = base_tr.shape[1]
     k = min(width, current_dim)
 
     if method_name == "pca":
         transform, top_evals = fit_pca_basis(base_tr, width=k)
         return {
+            "apply_kind": "linear",
             "transform_base": transform,
             "transform_view1": transform,
             "transform_view2": transform,
@@ -88,6 +104,7 @@ def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, l
     if method_name == "random":
         transform = fit_random_orthogonal(current_dim, width=k, seed=layer_seed)
         return {
+            "apply_kind": "linear",
             "transform_base": transform,
             "transform_view1": transform,
             "transform_view2": transform,
@@ -118,6 +135,7 @@ def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, l
 
         if model is not None:
             return {
+                "apply_kind": "linear",
                 "transform_base": model["transform_base"],
                 "transform_view1": model["transform_view1"],
                 "transform_view2": model["transform_view2"],
@@ -156,6 +174,7 @@ def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, l
         modes, kept_gains = topk_columns(eigvecs, gains, width=k, descending=True)
         transform = sigma_inv_sqrt @ (modes * kept_gains)
         return {
+            "apply_kind": "linear",
             "transform_base": transform,
             "transform_view1": transform,
             "transform_view2": transform,
@@ -179,6 +198,7 @@ def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, l
         modes, kept_gains = topk_columns(eigvecs, residual_gains, width=k, descending=True)
         transform = sigma_inv_sqrt @ (modes * kept_gains)
         return {
+            "apply_kind": "linear",
             "transform_base": transform,
             "transform_view1": transform,
             "transform_view2": transform,
@@ -203,6 +223,7 @@ def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, l
         modes, kept_gains = topk_columns(eigvecs, residual_gains, width=k, descending=True)
         transform = sigma_inv_sqrt @ (modes * kept_gains)
         return {
+            "apply_kind": "linear",
             "transform_base": transform,
             "transform_view1": transform,
             "transform_view2": transform,
@@ -225,6 +246,7 @@ def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, l
         modes, kept_scores = topk_columns(eigvecs, eigvals, width=k, descending=True)
         transform = sigma_inv_sqrt @ modes
         return {
+            "apply_kind": "linear",
             "transform_base": transform,
             "transform_view1": transform,
             "transform_view2": transform,
@@ -243,6 +265,7 @@ def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, l
         eigvals, eigvecs = cfbt.eigh(shared, sigma_reg)
         modes, kept_scores = topk_columns(eigvecs, eigvals, width=k, descending=True)
         return {
+            "apply_kind": "linear",
             "transform_base": modes,
             "transform_view1": modes,
             "transform_view2": modes,
@@ -262,6 +285,7 @@ def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, l
         transform_base = 0.5 * (transform_a + transform_b)
         canonical_corrs = model["canonical_correlations"][:k]
         return {
+            "apply_kind": "linear",
             "transform_base": transform_base,
             "transform_view1": transform_a,
             "transform_view2": transform_b,
@@ -274,7 +298,84 @@ def fit_activation_transforms(method_name, base_tr, view1_tr, view2_tr, width, l
             },
         }
 
+    if method_name in ATTENTION_MODELS:
+        target_mode = "residual" if method_name.endswith("residual") else "mean"
+        if method_name == "supervised-prototype-attention":
+            model = cfatt.fit_supervised_prototype_attention(
+                base_tr,
+                ytr,
+                lambda_reg=lambda_reg,
+                seed=layer_seed,
+            )
+        elif method_name.startswith("axial-"):
+            fit_fn = cfatt.fit_axial_landmark_attention_from_pairs
+            model = fit_fn(
+                view1_tr,
+                view2_tr,
+                lambda_reg=lambda_reg,
+                num_landmarks=min(width, 16),
+                target_mode=target_mode,
+            )
+        elif method_name.startswith("global-"):
+            fit_fn = cfatt.fit_global_landmark_attention_from_pairs
+            model = fit_fn(
+                view1_tr,
+                view2_tr,
+                lambda_reg=lambda_reg,
+                num_landmarks=min(width, 256),
+                target_mode=target_mode,
+            )
+        elif method_name.startswith("memory-"):
+            model = cfatt.fit_memory_attention_from_pairs(
+                view1_tr,
+                view2_tr,
+                lambda_reg=lambda_reg,
+                num_memories=min(view1_tr.shape[0], 256),
+                target_mode=target_mode,
+                seed=layer_seed,
+            )
+        else:
+            fit_fn = cfatt.fit_landmark_attention_from_pairs
+            model = fit_fn(
+                view1_tr,
+                view2_tr,
+                lambda_reg=lambda_reg,
+                num_landmarks=min(width, 16),
+                target_mode=target_mode,
+            )
+        shared_eigs = model.get("shared_eigenvalues", [])
+        top_score = float(shared_eigs[0]) if len(shared_eigs) else float("nan")
+        bottom_score = float(shared_eigs[-1]) if len(shared_eigs) else float("nan")
+        return {
+            "apply_kind": "attention",
+            "attention_model": model,
+            "method_stats": {
+                "method": method_name,
+                "rank": int(model.get("landmark_count", model.get("num_classes", 0))),
+                "top_score": top_score,
+                "bottom_score": bottom_score,
+                "rank_variant": (
+                    "prototype-attention"
+                    if method_name == "supervised-prototype-attention"
+                    else
+                    "memory-attention"
+                    if method_name.startswith("memory-")
+                    else
+                    "axial-attention"
+                    if method_name.startswith("axial-")
+                    else "global-attention"
+                    if method_name.startswith("global-")
+                    else "landmark-attention"
+                ),
+                "token_count": int(model["layout"]["num_tokens"]) if "layout" in model else model.get("memory_count", 1),
+                "token_dim": int(model["layout"]["token_dim"]) if "layout" in model else current_dim,
+                "shared_trace": model.get("shared_trace", float("nan")),
+                "delta_trace": model.get("delta_trace", float("nan")),
+            },
+        }
+
     return {
+        "apply_kind": "linear",
         "transform_base": fit_random_orthogonal(current_dim, width=k, seed=layer_seed),
         "transform_view1": fit_random_orthogonal(current_dim, width=k, seed=layer_seed + 1),
         "transform_view2": fit_random_orthogonal(current_dim, width=k, seed=layer_seed + 2),
@@ -287,7 +388,25 @@ def hidden_probe_accuracy(Htr, ytr, Hte, yte):
     return cfbt.fit_linear_probe(ztr, ytr, zte, yte)
 
 
-def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_reg, lambda_reg, activation, aug_repeats, dual_mapping=False):
+def center_train_test(train_array, test_array):
+    mean = train_array.mean(axis=0, keepdims=True)
+    return train_array - mean, test_array - mean
+
+
+def run_experiment(
+    dataset_name,
+    suite_name,
+    layer_method,
+    width,
+    depth,
+    head_reg,
+    lambda_reg,
+    activation,
+    aug_repeats,
+    dual_mapping=False,
+    output_source=OUTPUT_SOURCE,
+    center_after_hidden=CENTER_AFTER_HIDDEN,
+):
     dataset = cifar_shared.load_cifar_numpy(
         dataset_name,
         n_train=N_TRAIN,
@@ -330,7 +449,7 @@ def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_re
     activation_param_count = 0
 
     for layer_idx in range(depth):
-        if dual_mapping:
+        if dual_mapping and output_source == "pre-hidden":
             output_map = ridge_regression(base_tr, ytr_onehot - yhat_tr, reg=head_reg)
             output_param_count += int(output_map.size)
             yhat_tr = yhat_tr + base_tr @ output_map
@@ -348,15 +467,49 @@ def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_re
             width=width,
             lambda_reg=lambda_reg,
             layer_seed=SEED + 97 * (layer_idx + 1),
+            ytr=ytr,
         )
-        activation_param_count += int(fitted["transform_base"].size)
+        if fitted["apply_kind"] == "attention":
+            activation_param_count += fitted["attention_model"]["parameter_count"]
+            if "axis_models" in fitted["attention_model"]:
+                apply_fn = cfatt.apply_axial_landmark_attention
+            elif "prototypes" in fitted["attention_model"]:
+                apply_fn = cfatt.apply_supervised_prototype_attention
+            elif "memories" in fitted["attention_model"]:
+                apply_fn = cfatt.apply_memory_attention
+            elif "layout" in fitted["attention_model"]:
+                apply_fn = cfatt.apply_landmark_attention
+            else:
+                apply_fn = cfatt.apply_global_landmark_attention
+            base_tr = apply_fn(base_tr, fitted["attention_model"], activation=activation)
+            base_te = apply_fn(base_te, fitted["attention_model"], activation=activation)
+            view1_tr = apply_fn(view1_tr, fitted["attention_model"], activation=activation)
+            view2_tr = apply_fn(view2_tr, fitted["attention_model"], activation=activation)
+            view1_te = apply_fn(view1_te, fitted["attention_model"], activation=activation)
+            view2_te = apply_fn(view2_te, fitted["attention_model"], activation=activation)
+        else:
+            activation_param_count += int(fitted["transform_base"].size)
+            base_tr = cfbt.apply_layer(base_tr, fitted["transform_base"], activation=activation)
+            base_te = cfbt.apply_layer(base_te, fitted["transform_base"], activation=activation)
+            view1_tr = cfbt.apply_layer(view1_tr, fitted["transform_view1"], activation=activation)
+            view2_tr = cfbt.apply_layer(view2_tr, fitted["transform_view2"], activation=activation)
+            view1_te = cfbt.apply_layer(view1_te, fitted["transform_view1"], activation=activation)
+            view2_te = cfbt.apply_layer(view2_te, fitted["transform_view2"], activation=activation)
 
-        base_tr = cfbt.apply_layer(base_tr, fitted["transform_base"], activation=activation)
-        base_te = cfbt.apply_layer(base_te, fitted["transform_base"], activation=activation)
-        view1_tr = cfbt.apply_layer(view1_tr, fitted["transform_view1"], activation=activation)
-        view2_tr = cfbt.apply_layer(view2_tr, fitted["transform_view2"], activation=activation)
-        view1_te = cfbt.apply_layer(view1_te, fitted["transform_view1"], activation=activation)
-        view2_te = cfbt.apply_layer(view2_te, fitted["transform_view2"], activation=activation)
+        if center_after_hidden:
+            base_tr, base_te = center_train_test(base_tr, base_te)
+            view1_tr, view1_te = center_train_test(view1_tr, view1_te)
+            view2_tr, view2_te = center_train_test(view2_tr, view2_te)
+
+        if dual_mapping and output_source == "post-hidden":
+            output_map = ridge_regression(base_tr, ytr_onehot - yhat_tr, reg=head_reg)
+            output_param_count += int(output_map.size)
+            yhat_tr = yhat_tr + base_tr @ output_map
+            yhat_te = yhat_te + base_te @ output_map
+            layer_acc = float((np.argmax(yhat_te, axis=1) == yte).mean())
+            layer_train_loss = squared_prediction_loss(yhat_tr, ytr_onehot)
+            layer_test_loss = squared_prediction_loss(yhat_te, yte_onehot)
+            layer_hidden_probe = hidden_probe_accuracy(base_tr, ytr, base_te, yte)
 
         train_arrays, test_arrays = cfbt.normalize_hidden(
             [base_tr, view1_tr, view2_tr],
@@ -410,6 +563,8 @@ def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_re
         "augment_repeats": aug_repeats,
         "head_reg": head_reg,
         "lambda_reg": lambda_reg,
+        "output_source": output_source,
+        "center_after_hidden": center_after_hidden,
         "n_train": N_TRAIN,
         "n_test": N_TEST,
         "classifier_accuracy": final_classifier_acc,
@@ -424,7 +579,20 @@ def run_experiment(dataset_name, suite_name, layer_method, width, depth, head_re
     return results
 
 
-def run_sweep(datasets, suites, methods, width, depth, head_reg, lambda_reg, activation, aug_repeats, dual_mapping=False):
+def run_sweep(
+    datasets,
+    suites,
+    methods,
+    width,
+    depth,
+    head_reg,
+    lambda_reg,
+    activation,
+    aug_repeats,
+    dual_mapping=False,
+    output_source=OUTPUT_SOURCE,
+    center_after_hidden=CENTER_AFTER_HIDDEN,
+):
     all_results = []
     for dataset_name in datasets:
         for suite_name in suites:
@@ -441,6 +609,8 @@ def run_sweep(datasets, suites, methods, width, depth, head_reg, lambda_reg, act
                         activation=activation,
                         aug_repeats=aug_repeats,
                         dual_mapping=dual_mapping,
+                        output_source=output_source,
+                        center_after_hidden=center_after_hidden,
                     )
                 )
     return all_results
@@ -452,12 +622,14 @@ def main():
     parser.add_argument("--suite", choices=SUITES + ["all"], default="all")
     parser.add_argument("--method", choices=LAYER_METHODS + ["all"], default="all")
     parser.add_argument("--depth", type=int, default=DEPTH)
-    parser.add_argument("--width", type=int, default=WIDTH)
+    parser.add_argument("--width", type=int, default=W)
     parser.add_argument("--head-reg", type=float, default=HEAD_REG)
     parser.add_argument("--lambda-reg", type=float, default=LAMBDA_REG)
     parser.add_argument("--activation", type=str, default=ACTIVATION)
     parser.add_argument("--augment-repeats", type=int, default=ANALYTIC_AUG_REPEATS)
     parser.add_argument("--dual-mapping", action="store_true")
+    parser.add_argument("--output-source", choices=["pre-hidden", "post-hidden"], default=OUTPUT_SOURCE)
+    parser.add_argument("--center-after-hidden", action="store_true")
     parser.add_argument("--json-out", type=Path, default=None)
     args = parser.parse_args()
 
@@ -476,6 +648,8 @@ def main():
         activation=args.activation,
         aug_repeats=args.augment_repeats,
         dual_mapping=args.dual_mapping,
+        output_source=args.output_source,
+        center_after_hidden=args.center_after_hidden,
     )
 
     summary = {
@@ -490,6 +664,8 @@ def main():
             "lambda_reg": args.lambda_reg,
             "activation": args.activation,
             "dual_mapping": args.dual_mapping,
+            "output_source": args.output_source,
+            "center_after_hidden": args.center_after_hidden,
         },
         "results": results,
     }
