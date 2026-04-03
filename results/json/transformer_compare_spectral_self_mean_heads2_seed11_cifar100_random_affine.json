@@ -1,0 +1,101 @@
+{
+  "config": {
+    "dataset": "cifar100",
+    "suite": "random-affine",
+    "patch_size": 8,
+    "depth": 3,
+    "n_train": 10000,
+    "n_test": 2000,
+    "batch_size": 256,
+    "epochs": 20,
+    "lr": 0.0003,
+    "weight_decay": 0.05,
+    "head_reg": 100.0,
+    "lambda_reg": 1.0,
+    "num_landmarks": 8,
+    "num_heads": 4,
+    "analytic_num_heads": 2,
+    "mlp_ratio": 2.0,
+    "attention_kind": "landmark",
+    "attention_target": "mean",
+    "attention_rank": 0,
+    "local_sigma": 1.5,
+    "attention_power_iters": 8,
+    "attention_seed": -1,
+    "seed": 11,
+    "image_size": 32,
+    "in_chans": 3
+  },
+  "attention_kinds": [
+    "spectral-self"
+  ],
+  "results": [
+    {
+      "model": "closed-form-transformer:spectral-self",
+      "config": {
+        "dataset": "cifar100",
+        "suite": "random-affine",
+        "patch_size": 8,
+        "depth": 3,
+        "n_train": 10000,
+        "n_test": 2000,
+        "batch_size": 256,
+        "epochs": 20,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "head_reg": 100.0,
+        "lambda_reg": 1.0,
+        "num_landmarks": 8,
+        "num_heads": 4,
+        "analytic_num_heads": 2,
+        "mlp_ratio": 2.0,
+        "attention_kind": "spectral-self",
+        "attention_target": "mean",
+        "attention_rank": 0,
+        "local_sigma": 1.5,
+        "attention_power_iters": 8,
+        "attention_seed": -1,
+        "seed": 11,
+        "image_size": 32,
+        "in_chans": 3
+      },
+      "classifier_accuracy": 0.1105,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.0535,
+          "attention_kind": "spectral-self",
+          "attention_rank": 16,
+          "attention_mix_scale": 0.7351022270068454,
+          "selected_score_scales": null,
+          "train_fit_loss": null,
+          "top_shared_eigenvalue": 0.9998587101937554
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.0965,
+          "attention_kind": "spectral-self",
+          "attention_rank": 16,
+          "attention_mix_scale": 0.753156275919521,
+          "selected_score_scales": null,
+          "train_fit_loss": null,
+          "top_shared_eigenvalue": 0.9954848440192464
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.1105,
+          "attention_kind": "spectral-self",
+          "attention_rank": 16,
+          "attention_mix_scale": 0.823105508405967,
+          "selected_score_scales": null,
+          "train_fit_loss": null,
+          "top_shared_eigenvalue": 0.9923067892660992
+        }
+      ],
+      "output_param_count": 57600,
+      "hidden_param_count": 451584,
+      "total_parameter_count": 509184,
+      "fit_time_sec": 46.27694789999805
+    }
+  ]
+}

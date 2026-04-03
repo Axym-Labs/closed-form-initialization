@@ -1,0 +1,107 @@
+{
+  "config": {
+    "dataset": "cifar100",
+    "suite": "random-affine",
+    "patch_size": 8,
+    "depth": 3,
+    "n_train": 10000,
+    "n_test": 2000,
+    "batch_size": 256,
+    "epochs": 20,
+    "lr": 0.0003,
+    "weight_decay": 0.05,
+    "head_reg": 100.0,
+    "lambda_reg": 1.0,
+    "num_landmarks": 8,
+    "num_heads": 4,
+    "analytic_num_heads": 2,
+    "mlp_ratio": 2.0,
+    "attention_kind": "landmark",
+    "attention_target": "mean",
+    "attention_rank": 0,
+    "local_sigma": 1.5,
+    "attention_power_iters": 24,
+    "attention_seed": 0,
+    "seed": 7,
+    "image_size": 32,
+    "in_chans": 3
+  },
+  "attention_kinds": [
+    "score-self-power-bagged-gain"
+  ],
+  "results": [
+    {
+      "model": "closed-form-transformer:score-self-power-bagged-gain",
+      "config": {
+        "dataset": "cifar100",
+        "suite": "random-affine",
+        "patch_size": 8,
+        "depth": 3,
+        "n_train": 10000,
+        "n_test": 2000,
+        "batch_size": 256,
+        "epochs": 20,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "head_reg": 100.0,
+        "lambda_reg": 1.0,
+        "num_landmarks": 8,
+        "num_heads": 4,
+        "analytic_num_heads": 2,
+        "mlp_ratio": 2.0,
+        "attention_kind": "score-self-power-bagged-gain",
+        "attention_target": "mean",
+        "attention_rank": 0,
+        "local_sigma": 1.5,
+        "attention_power_iters": 24,
+        "attention_seed": 0,
+        "seed": 7,
+        "image_size": 32,
+        "in_chans": 3
+      },
+      "classifier_accuracy": 0.131,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.059,
+          "attention_kind": "score-self-power-bagged-gain",
+          "attention_rank": 16,
+          "attention_mix_scale": 0.7228247035119498,
+          "selected_score_scales": {
+            "all": 1.0
+          },
+          "train_fit_loss": 0.020046131217563504,
+          "top_shared_eigenvalue": 0.9998704494938143
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.106,
+          "attention_kind": "score-self-power-bagged-gain",
+          "attention_rank": 16,
+          "attention_mix_scale": 0.8100003279066912,
+          "selected_score_scales": {
+            "all": 2.0
+          },
+          "train_fit_loss": 0.06222526328071822,
+          "top_shared_eigenvalue": 0.9958369482317655
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.131,
+          "attention_kind": "score-self-power-bagged-gain",
+          "attention_rank": 16,
+          "attention_mix_scale": 0.7669147406859838,
+          "selected_score_scales": {
+            "all": 6.0
+          },
+          "train_fit_loss": 0.09674442434092045,
+          "top_shared_eigenvalue": 0.9912301064675844
+        }
+      ],
+      "output_param_count": 57600,
+      "hidden_param_count": 451584,
+      "total_parameter_count": 509184,
+      "fit_time_sec": 311.53942710000047
+    }
+  ]
+}

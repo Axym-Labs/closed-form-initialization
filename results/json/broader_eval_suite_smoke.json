@@ -1,0 +1,1590 @@
+{
+  "config": {
+    "datasets": [
+      "covtype"
+    ],
+    "main_seeds": [
+      7,
+      11,
+      19
+    ],
+    "scaling_seeds": [
+      7,
+      11
+    ],
+    "scaling_dataset": "svhn",
+    "run_selection": false,
+    "skip_main": false,
+    "skip_scaling": true,
+    "mlp_config": {
+      "width": 512,
+      "depth": 3,
+      "activation": "relu",
+      "lambda_reg": 1.0,
+      "head_reg": 100.0,
+      "epochs": 8,
+      "batch_size": 256,
+      "lr": 0.001,
+      "weight_decay": 0.0001
+    },
+    "transformer_config": {
+      "depth": 3,
+      "patch_size": 8,
+      "lambda_reg": 1.0,
+      "head_reg": 100.0,
+      "epochs": 5,
+      "batch_size": 128,
+      "lr": 0.0003,
+      "weight_decay": 0.05,
+      "num_heads": 4,
+      "analytic_num_heads": 2,
+      "num_landmarks": 8,
+      "mlp_ratio": 2.0,
+      "attention_target": "mean",
+      "attention_rank": 0,
+      "local_sigma": 1.5,
+      "attention_power_iters": 8,
+      "attention_num_bags": 4,
+      "attention_bag_fraction": 0.7
+    },
+    "mlp_candidates": [
+      "closed-form-barlow",
+      "paper-cca-shared",
+      "whitened-shared-pca"
+    ],
+    "transformer_candidates": [
+      "spectral-self",
+      "spectral-self-token-stats",
+      "spectral-self-whitened",
+      "score-self-power-bagged-gain",
+      "score-self-power-bagged-consensus-gain"
+    ]
+  },
+  "selection": {
+    "mlp": [
+      {
+        "method": "closed-form-barlow",
+        "mean_accuracy": 0.2765238095238095,
+        "std_accuracy": 0.14019565207836512,
+        "best_accuracy": 0.448,
+        "num_logs": 42,
+        "selection_score": 0.24403798464156257
+      },
+      {
+        "method": "paper-cca-shared",
+        "mean_accuracy": 0.2550810810810811,
+        "std_accuracy": 0.1389042793842713,
+        "best_accuracy": 0.434,
+        "num_logs": 37,
+        "selection_score": 0.22200480298620928
+      },
+      {
+        "method": "whitened-shared-pca",
+        "mean_accuracy": 0.23014285714285712,
+        "std_accuracy": 0.13068948502690889,
+        "best_accuracy": 0.394,
+        "num_logs": 21,
+        "selection_score": 0.19570853916298586
+      }
+    ],
+    "transformer": [
+      {
+        "method": "score-self-power-bagged-consensus-gain",
+        "mean_accuracy": 0.11225,
+        "std_accuracy": 0.009182183836103482,
+        "best_accuracy": 0.1265,
+        "num_logs": 4,
+        "selection_score": 0.12375328720628927
+      },
+      {
+        "method": "score-self-power-bagged-gain",
+        "mean_accuracy": 0.113,
+        "std_accuracy": 0.011537980759214327,
+        "best_accuracy": 0.131,
+        "num_logs": 4,
+        "selection_score": 0.12332538874473384
+      },
+      {
+        "method": "spectral-self",
+        "mean_accuracy": 0.11980113636363637,
+        "std_accuracy": 0.0454361191344962,
+        "best_accuracy": 0.2578125,
+        "num_logs": 11,
+        "selection_score": 0.12193214329426828
+      },
+      {
+        "method": "spectral-self-token-stats",
+        "mean_accuracy": 0.109625,
+        "std_accuracy": 0.00981309711558996,
+        "best_accuracy": 0.1245,
+        "num_logs": 4,
+        "selection_score": 0.12081283056654603
+      },
+      {
+        "method": "spectral-self-whitened",
+        "mean_accuracy": 0.10933333333333334,
+        "std_accuracy": 0.005328122454381932,
+        "best_accuracy": 0.1145,
+        "num_logs": 3,
+        "selection_score": 0.12053221571734127
+      }
+    ]
+  },
+  "winners": {
+    "mlp": "closed-form-barlow",
+    "transformer": "score-self-power-bagged-consensus-gain"
+  },
+  "main_results": [
+    {
+      "architecture": "mlp",
+      "model": "closed-form",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 7,
+      "closed_form_method": "closed-form-barlow",
+      "classifier_accuracy": 0.6585,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.7,
+          "method": "closed-form-barlow",
+          "rank": 54,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "full-transform",
+          "distance_to_identity": 2.3481991023279285,
+          "distance_to_whitened_identity": 2.346530583909457,
+          "transform_fro": 5.4056354049247375,
+          "max_whitened_delta": 2.036719834703447,
+          "min_whitened_delta": 0.01963662563650991,
+          "max_shared_eigenvalue": null,
+          "min_shared_eigenvalue": null,
+          "max_residual_gain": null,
+          "min_residual_gain": null,
+          "max_canonical_correlation": null,
+          "min_canonical_correlation": null
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.66825,
+          "method": "closed-form-barlow",
+          "rank": 54,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "full-transform",
+          "distance_to_identity": 2.246710830396894,
+          "distance_to_whitened_identity": 2.2390568541310882,
+          "transform_fro": 5.487185533108293,
+          "max_whitened_delta": 2.021163881450228,
+          "min_whitened_delta": 0.006047643285979201,
+          "max_shared_eigenvalue": null,
+          "min_shared_eigenvalue": null,
+          "max_residual_gain": null,
+          "min_residual_gain": null,
+          "max_canonical_correlation": null,
+          "min_canonical_correlation": null
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.6585,
+          "method": "closed-form-barlow",
+          "rank": 54,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "full-transform",
+          "distance_to_identity": 2.257685887542382,
+          "distance_to_whitened_identity": 2.2413843032352423,
+          "transform_fro": 5.478253480659297,
+          "max_whitened_delta": 2.018119134696175,
+          "min_whitened_delta": 0.003934354826428671,
+          "max_shared_eigenvalue": null,
+          "min_shared_eigenvalue": null,
+          "max_residual_gain": null,
+          "min_residual_gain": null,
+          "max_canonical_correlation": null,
+          "min_canonical_correlation": null
+        }
+      ],
+      "hidden_param_count": 8748,
+      "output_param_count": 378,
+      "total_parameter_count": 9126,
+      "fit_time_sec": 0.13729949994012713,
+      "config": {
+        "width": 512,
+        "depth": 3,
+        "activation": "relu",
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 8,
+        "batch_size": 256,
+        "lr": 0.001,
+        "weight_decay": 0.0001
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.60875
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.425
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 37.19288243505595,
+          "centroid_margin": -0.03339026175675047,
+          "top1_importance_fraction": 0.5808655229436019,
+          "top20_importance_fraction": 0.9765885553496811,
+          "top20_deletion_logit_drop": 0.4423229415130623
+        }
+      }
+    },
+    {
+      "architecture": "mlp",
+      "model": "backprop",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 7,
+      "classifier_accuracy": 0.748,
+      "hidden_param_count": 551936,
+      "output_param_count": 3591,
+      "total_parameter_count": 555527,
+      "fit_time_sec": 2.7090226999716833,
+      "epoch_stats": [
+        {
+          "loss": 0.92202631209759
+        },
+        {
+          "loss": 0.6520688812783424
+        },
+        {
+          "loss": 0.6158899753651721
+        },
+        {
+          "loss": 0.5845567190900762
+        },
+        {
+          "loss": 0.5691855397630246
+        },
+        {
+          "loss": 0.5535385640377694
+        },
+        {
+          "loss": 0.5380035607104606
+        },
+        {
+          "loss": 0.5233599702094464
+        }
+      ],
+      "config": {
+        "width": 512,
+        "depth": 3,
+        "activation": "relu",
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 8,
+        "batch_size": 256,
+        "lr": 0.001,
+        "weight_decay": 0.0001
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.633
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.71875
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 4.416334451117031,
+          "centroid_margin": 0.007541746152148679,
+          "top1_importance_fraction": 0.4227186674335268,
+          "top20_importance_fraction": 0.909337688463917,
+          "top20_deletion_logit_drop": 5.5568497478961945
+        }
+      }
+    },
+    {
+      "architecture": "transformer",
+      "model": "closed-form",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 7,
+      "closed_form_method": "score-self-power-bagged-consensus-gain",
+      "classifier_accuracy": 0.56325,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.49,
+          "attention_kind": "score-self-power-bagged-consensus-gain",
+          "attention_rank": 16,
+          "train_fit_loss": 0.0019422466223748915
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.5,
+          "attention_kind": "score-self-power-bagged-consensus-gain",
+          "attention_rank": 16,
+          "train_fit_loss": 0.002876843979856163
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.56325,
+          "attention_kind": "score-self-power-bagged-consensus-gain",
+          "attention_rank": 16,
+          "train_fit_loss": 0.003023933490247481
+        }
+      ],
+      "hidden_param_count": 52224,
+      "output_param_count": 1344,
+      "total_parameter_count": 53568,
+      "fit_time_sec": 327.8315460999729,
+      "config": {
+        "depth": 3,
+        "patch_size": 8,
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 5,
+        "batch_size": 128,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "num_heads": 4,
+        "analytic_num_heads": 2,
+        "num_landmarks": 8,
+        "mlp_ratio": 2.0,
+        "attention_target": "mean",
+        "attention_rank": 0,
+        "local_sigma": 1.5,
+        "attention_power_iters": 8,
+        "attention_num_bags": 4,
+        "attention_bag_fraction": 0.7
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.52125
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.56225
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 20.87658602324138,
+          "centroid_margin": -4.4397607822447785e-05,
+          "top1_importance_fraction": 0.2982040992522508,
+          "top20_importance_fraction": 0.9052188327355061,
+          "top20_deletion_logit_drop": 0.09477627717067805
+        }
+      }
+    },
+    {
+      "architecture": "transformer",
+      "model": "backprop",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 7,
+      "classifier_accuracy": 0.621,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.62975
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.626
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.621
+        }
+      ],
+      "hidden_param_count": 100416,
+      "output_param_count": 1365,
+      "total_parameter_count": 101781,
+      "fit_time_sec": 24.581554600037634,
+      "epoch_stats": [
+        {
+          "loss": 1.3078788227223335
+        },
+        {
+          "loss": 1.1857248671511387
+        },
+        {
+          "loss": 0.9884756365989117
+        },
+        {
+          "loss": 0.9096861348507252
+        },
+        {
+          "loss": 0.8794316915755577
+        }
+      ],
+      "config": {
+        "depth": 3,
+        "patch_size": 8,
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 5,
+        "batch_size": 128,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "num_heads": 4,
+        "analytic_num_heads": 2,
+        "num_landmarks": 8,
+        "mlp_ratio": 2.0,
+        "attention_target": "mean",
+        "attention_rank": 0,
+        "local_sigma": 1.5,
+        "attention_power_iters": 8,
+        "attention_num_bags": 4,
+        "attention_bag_fraction": 0.7
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.578
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.62125
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 4.023961704407964,
+          "centroid_margin": -0.023742559389595803,
+          "top1_importance_fraction": 0.7204868373326102,
+          "top20_importance_fraction": 0.9798869387461322,
+          "top20_deletion_logit_drop": 1.1610070616006851
+        }
+      }
+    },
+    {
+      "architecture": "mlp",
+      "model": "closed-form",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 11,
+      "closed_form_method": "closed-form-barlow",
+      "classifier_accuracy": 0.649,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.69175,
+          "method": "closed-form-barlow",
+          "rank": 54,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "full-transform",
+          "distance_to_identity": 2.382753579815142,
+          "distance_to_whitened_identity": 2.380764902352627,
+          "transform_fro": 5.35951846299617,
+          "max_whitened_delta": 2.065380301119721,
+          "min_whitened_delta": 0.01953305710261549,
+          "max_shared_eigenvalue": null,
+          "min_shared_eigenvalue": null,
+          "max_residual_gain": null,
+          "min_residual_gain": null,
+          "max_canonical_correlation": null,
+          "min_canonical_correlation": null
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.665,
+          "method": "closed-form-barlow",
+          "rank": 54,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "full-transform",
+          "distance_to_identity": 2.2885551873940693,
+          "distance_to_whitened_identity": 2.280528387715762,
+          "transform_fro": 5.438276673289337,
+          "max_whitened_delta": 2.04647976106887,
+          "min_whitened_delta": 0.005764803021334641,
+          "max_shared_eigenvalue": null,
+          "min_shared_eigenvalue": null,
+          "max_residual_gain": null,
+          "min_residual_gain": null,
+          "max_canonical_correlation": null,
+          "min_canonical_correlation": null
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.649,
+          "method": "closed-form-barlow",
+          "rank": 54,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "full-transform",
+          "distance_to_identity": 2.300018606938862,
+          "distance_to_whitened_identity": 2.283405145152757,
+          "transform_fro": 5.427975176939154,
+          "max_whitened_delta": 2.0460621128012333,
+          "min_whitened_delta": 0.0035184349006778352,
+          "max_shared_eigenvalue": null,
+          "min_shared_eigenvalue": null,
+          "max_residual_gain": null,
+          "min_residual_gain": null,
+          "max_canonical_correlation": null,
+          "min_canonical_correlation": null
+        }
+      ],
+      "hidden_param_count": 8748,
+      "output_param_count": 378,
+      "total_parameter_count": 9126,
+      "fit_time_sec": 0.17422909999731928,
+      "config": {
+        "width": 512,
+        "depth": 3,
+        "activation": "relu",
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 8,
+        "batch_size": 256,
+        "lr": 0.001,
+        "weight_decay": 0.0001
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.597
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.42275
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 38.11453551205958,
+          "centroid_margin": -0.027545106523575762,
+          "top1_importance_fraction": 0.5583032625264146,
+          "top20_importance_fraction": 0.975025620392779,
+          "top20_deletion_logit_drop": 0.5138891129699206
+        }
+      }
+    },
+    {
+      "architecture": "mlp",
+      "model": "backprop",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 11,
+      "classifier_accuracy": 0.748,
+      "hidden_param_count": 551936,
+      "output_param_count": 3591,
+      "total_parameter_count": 555527,
+      "fit_time_sec": 2.7032326000044122,
+      "epoch_stats": [
+        {
+          "loss": 0.9499245311351533
+        },
+        {
+          "loss": 0.6596380573637942
+        },
+        {
+          "loss": 0.6146480250865856
+        },
+        {
+          "loss": 0.5942542806584784
+        },
+        {
+          "loss": 0.5726303971828298
+        },
+        {
+          "loss": 0.5560480666921493
+        },
+        {
+          "loss": 0.5401535573157858
+        },
+        {
+          "loss": 0.531605489076452
+        }
+      ],
+      "config": {
+        "width": 512,
+        "depth": 3,
+        "activation": "relu",
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 8,
+        "batch_size": 256,
+        "lr": 0.001,
+        "weight_decay": 0.0001
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.65075
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.726
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 4.539121720595451,
+          "centroid_margin": 0.00678416238579841,
+          "top1_importance_fraction": 0.44613693319280656,
+          "top20_importance_fraction": 0.9288536431549737,
+          "top20_deletion_logit_drop": 6.880785658955574
+        }
+      }
+    },
+    {
+      "architecture": "transformer",
+      "model": "closed-form",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 11,
+      "closed_form_method": "score-self-power-bagged-consensus-gain",
+      "classifier_accuracy": 0.5315,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.484,
+          "attention_kind": "score-self-power-bagged-consensus-gain",
+          "attention_rank": 16,
+          "train_fit_loss": 0.0019953146224667125
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.48775,
+          "attention_kind": "score-self-power-bagged-consensus-gain",
+          "attention_rank": 16,
+          "train_fit_loss": 0.0028516531018302656
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.5315,
+          "attention_kind": "score-self-power-bagged-consensus-gain",
+          "attention_rank": 16,
+          "train_fit_loss": 0.0029699055609135293
+        }
+      ],
+      "hidden_param_count": 52224,
+      "output_param_count": 1344,
+      "total_parameter_count": 53568,
+      "fit_time_sec": 329.4594948999584,
+      "config": {
+        "depth": 3,
+        "patch_size": 8,
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 5,
+        "batch_size": 128,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "num_heads": 4,
+        "analytic_num_heads": 2,
+        "num_landmarks": 8,
+        "mlp_ratio": 2.0,
+        "attention_target": "mean",
+        "attention_rank": 0,
+        "local_sigma": 1.5,
+        "attention_power_iters": 8,
+        "attention_num_bags": 4,
+        "attention_bag_fraction": 0.7
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.50625
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.53325
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 21.25580400966407,
+          "centroid_margin": -5.165451140635391e-05,
+          "top1_importance_fraction": 0.32401900807201217,
+          "top20_importance_fraction": 0.900508524845429,
+          "top20_deletion_logit_drop": 0.0883119973659112
+        }
+      }
+    },
+    {
+      "architecture": "transformer",
+      "model": "backprop",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 11,
+      "classifier_accuracy": 0.63675,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.62775
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.641
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.63675
+        }
+      ],
+      "hidden_param_count": 100416,
+      "output_param_count": 1365,
+      "total_parameter_count": 101781,
+      "fit_time_sec": 25.92285540001467,
+      "epoch_stats": [
+        {
+          "loss": 1.2509179939614965
+        },
+        {
+          "loss": 1.1779605251677492
+        },
+        {
+          "loss": 0.981482448095971
+        },
+        {
+          "loss": 0.9080678370404751
+        },
+        {
+          "loss": 0.8768399953842163
+        }
+      ],
+      "config": {
+        "depth": 3,
+        "patch_size": 8,
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 5,
+        "batch_size": 128,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "num_heads": 4,
+        "analytic_num_heads": 2,
+        "num_landmarks": 8,
+        "mlp_ratio": 2.0,
+        "attention_target": "mean",
+        "attention_rank": 0,
+        "local_sigma": 1.5,
+        "attention_power_iters": 8,
+        "attention_num_bags": 4,
+        "attention_bag_fraction": 0.7
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.58625
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.63325
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 3.263828376629708,
+          "centroid_margin": -0.030001573648914353,
+          "top1_importance_fraction": 0.7020420358420377,
+          "top20_importance_fraction": 0.9910156497406524,
+          "top20_deletion_logit_drop": 1.446123406291008
+        }
+      }
+    },
+    {
+      "architecture": "mlp",
+      "model": "closed-form",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 19,
+      "closed_form_method": "closed-form-barlow",
+      "classifier_accuracy": 0.65625,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.68425,
+          "method": "closed-form-barlow",
+          "rank": 54,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "full-transform",
+          "distance_to_identity": 2.519608572008835,
+          "distance_to_whitened_identity": 2.517647295259325,
+          "transform_fro": 5.2661833372339455,
+          "max_whitened_delta": 2.070741209936196,
+          "min_whitened_delta": 0.019897606102008858,
+          "max_shared_eigenvalue": null,
+          "min_shared_eigenvalue": null,
+          "max_residual_gain": null,
+          "min_residual_gain": null,
+          "max_canonical_correlation": null,
+          "min_canonical_correlation": null
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.6635,
+          "method": "closed-form-barlow",
+          "rank": 54,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "full-transform",
+          "distance_to_identity": 2.429819246976256,
+          "distance_to_whitened_identity": 2.421941199971894,
+          "transform_fro": 5.3440391077665375,
+          "max_whitened_delta": 2.045345134804405,
+          "min_whitened_delta": 0.005345892501625168,
+          "max_shared_eigenvalue": null,
+          "min_shared_eigenvalue": null,
+          "max_residual_gain": null,
+          "min_residual_gain": null,
+          "max_canonical_correlation": null,
+          "min_canonical_correlation": null
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.65625,
+          "method": "closed-form-barlow",
+          "rank": 54,
+          "top_score": NaN,
+          "bottom_score": NaN,
+          "rank_variant": "full-transform",
+          "distance_to_identity": 2.4402211799311355,
+          "distance_to_whitened_identity": 2.424441653068049,
+          "transform_fro": 5.332513823587749,
+          "max_whitened_delta": 2.043648968211967,
+          "min_whitened_delta": 0.0031223975779482256,
+          "max_shared_eigenvalue": null,
+          "min_shared_eigenvalue": null,
+          "max_residual_gain": null,
+          "min_residual_gain": null,
+          "max_canonical_correlation": null,
+          "min_canonical_correlation": null
+        }
+      ],
+      "hidden_param_count": 8748,
+      "output_param_count": 378,
+      "total_parameter_count": 9126,
+      "fit_time_sec": 0.15277350007090718,
+      "config": {
+        "width": 512,
+        "depth": 3,
+        "activation": "relu",
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 8,
+        "batch_size": 256,
+        "lr": 0.001,
+        "weight_decay": 0.0001
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.60125
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.26175
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 1.000000007918267,
+          "centroid_margin": -0.024120921186353162,
+          "top1_importance_fraction": 0.5311061372248155,
+          "top20_importance_fraction": 0.9775778954729857,
+          "top20_deletion_logit_drop": 0.28389603438975697
+        }
+      }
+    },
+    {
+      "architecture": "mlp",
+      "model": "backprop",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 19,
+      "classifier_accuracy": 0.74425,
+      "hidden_param_count": 551936,
+      "output_param_count": 3591,
+      "total_parameter_count": 555527,
+      "fit_time_sec": 2.782570599927567,
+      "epoch_stats": [
+        {
+          "loss": 0.9265352183199943
+        },
+        {
+          "loss": 0.6663315663946435
+        },
+        {
+          "loss": 0.6287543355150426
+        },
+        {
+          "loss": 0.5968923670180301
+        },
+        {
+          "loss": 0.5824175419959616
+        },
+        {
+          "loss": 0.5617146155935653
+        },
+        {
+          "loss": 0.5594459461404923
+        },
+        {
+          "loss": 0.5314276693983281
+        }
+      ],
+      "config": {
+        "width": 512,
+        "depth": 3,
+        "activation": "relu",
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 8,
+        "batch_size": 256,
+        "lr": 0.001,
+        "weight_decay": 0.0001
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.6205
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.7205
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 1.0000011462420424,
+          "centroid_margin": 0.007383675183184508,
+          "top1_importance_fraction": 0.46039005021674095,
+          "top20_importance_fraction": 0.9124268537206284,
+          "top20_deletion_logit_drop": 5.178501278162003
+        }
+      }
+    },
+    {
+      "architecture": "transformer",
+      "model": "closed-form",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 19,
+      "closed_form_method": "score-self-power-bagged-consensus-gain",
+      "classifier_accuracy": 0.56,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.482,
+          "attention_kind": "score-self-power-bagged-consensus-gain",
+          "attention_rank": 16,
+          "train_fit_loss": 0.0018871957645931476
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.4945,
+          "attention_kind": "score-self-power-bagged-consensus-gain",
+          "attention_rank": 16,
+          "train_fit_loss": 0.0028739413451850855
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.56,
+          "attention_kind": "score-self-power-bagged-consensus-gain",
+          "attention_rank": 16,
+          "train_fit_loss": 0.002975555764309451
+        }
+      ],
+      "hidden_param_count": 52224,
+      "output_param_count": 1344,
+      "total_parameter_count": 53568,
+      "fit_time_sec": 332.9332043000031,
+      "config": {
+        "depth": 3,
+        "patch_size": 8,
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 5,
+        "batch_size": 128,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "num_heads": 4,
+        "analytic_num_heads": 2,
+        "num_landmarks": 8,
+        "mlp_ratio": 2.0,
+        "attention_target": "mean",
+        "attention_rank": 0,
+        "local_sigma": 1.5,
+        "attention_power_iters": 8,
+        "attention_num_bags": 4,
+        "attention_bag_fraction": 0.7
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.522
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.55675
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 12.970813471087952,
+          "centroid_margin": -5.226724058226488e-05,
+          "top1_importance_fraction": 0.32073376256802827,
+          "top20_importance_fraction": 0.9091319578886101,
+          "top20_deletion_logit_drop": 0.0820051682026989
+        }
+      }
+    },
+    {
+      "architecture": "transformer",
+      "model": "backprop",
+      "dataset": "covtype",
+      "suite": "feature-mask",
+      "seed": 19,
+      "classifier_accuracy": 0.63275,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.632
+        },
+        {
+          "depth": 2,
+          "classifier_accuracy": 0.63575
+        },
+        {
+          "depth": 3,
+          "classifier_accuracy": 0.63275
+        }
+      ],
+      "hidden_param_count": 100416,
+      "output_param_count": 1365,
+      "total_parameter_count": 101781,
+      "fit_time_sec": 24.596800099941902,
+      "epoch_stats": [
+        {
+          "loss": 1.2711602208462167
+        },
+        {
+          "loss": 1.1620056515044355
+        },
+        {
+          "loss": 0.9668509674833176
+        },
+        {
+          "loss": 0.8896671692107586
+        },
+        {
+          "loss": 0.8645788919418416
+        }
+      ],
+      "config": {
+        "depth": 3,
+        "patch_size": 8,
+        "lambda_reg": 1.0,
+        "head_reg": 100.0,
+        "epochs": 5,
+        "batch_size": 128,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "num_heads": 4,
+        "analytic_num_heads": 2,
+        "num_landmarks": 8,
+        "mlp_ratio": 2.0,
+        "attention_target": "mean",
+        "attention_rank": 0,
+        "local_sigma": 1.5,
+        "attention_power_iters": 8,
+        "attention_num_bags": 4,
+        "attention_bag_fraction": 0.7
+      },
+      "analysis": {
+        "ood_results": [
+          {
+            "shift": "feature-mask",
+            "accuracy": 0.58725
+          },
+          {
+            "shift": "gaussian-noise",
+            "accuracy": 0.6295
+          }
+        ],
+        "interpretability": {
+          "effective_rank": 1.0046658948734242,
+          "centroid_margin": -0.027732252442862766,
+          "top1_importance_fraction": 0.714527631201677,
+          "top20_importance_fraction": 0.9942973870541338,
+          "top20_deletion_logit_drop": 2.3721964955329895
+        }
+      }
+    }
+  ],
+  "main_summary": [
+    {
+      "architecture": "mlp",
+      "model": "backprop",
+      "dataset": "covtype",
+      "mean_accuracy": 0.74675,
+      "std_accuracy": 0.0017677669529663834,
+      "ci95_accuracy": 0.00245000000000002,
+      "runs": 3
+    },
+    {
+      "architecture": "mlp",
+      "model": "closed-form",
+      "dataset": "covtype",
+      "mean_accuracy": 0.6545833333333334,
+      "std_accuracy": 0.004053462169005085,
+      "ci95_accuracy": 0.005617811950493789,
+      "runs": 3
+    },
+    {
+      "architecture": "transformer",
+      "model": "backprop",
+      "dataset": "covtype",
+      "mean_accuracy": 0.6301666666666668,
+      "std_accuracy": 0.006684351543385177,
+      "ci95_accuracy": 0.00926403859615835,
+      "runs": 3
+    },
+    {
+      "architecture": "transformer",
+      "model": "closed-form",
+      "dataset": "covtype",
+      "mean_accuracy": 0.5515833333333333,
+      "std_accuracy": 0.014262908383480434,
+      "ci95_accuracy": 0.019767382505306887,
+      "runs": 3
+    }
+  ],
+  "analytics_tables": {
+    "run_table": [
+      {
+        "run_id": "mlp::closed-form::covtype::7",
+        "architecture": "mlp",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 7,
+        "classifier_accuracy": 0.6585,
+        "total_parameter_count": 9126,
+        "fit_time_sec": 0.13729949994012713,
+        "effective_rank": 37.19288243505595,
+        "centroid_margin": -0.03339026175675047,
+        "top1_importance_fraction": 0.5808655229436019,
+        "top20_importance_fraction": 0.9765885553496811,
+        "top20_deletion_logit_drop": 0.4423229415130623
+      },
+      {
+        "run_id": "mlp::backprop::covtype::7",
+        "architecture": "mlp",
+        "model": "backprop",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 7,
+        "classifier_accuracy": 0.748,
+        "total_parameter_count": 555527,
+        "fit_time_sec": 2.7090226999716833,
+        "effective_rank": 4.416334451117031,
+        "centroid_margin": 0.007541746152148679,
+        "top1_importance_fraction": 0.4227186674335268,
+        "top20_importance_fraction": 0.909337688463917,
+        "top20_deletion_logit_drop": 5.5568497478961945
+      },
+      {
+        "run_id": "transformer::closed-form::covtype::7",
+        "architecture": "transformer",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 7,
+        "classifier_accuracy": 0.56325,
+        "total_parameter_count": 53568,
+        "fit_time_sec": 327.8315460999729,
+        "effective_rank": 20.87658602324138,
+        "centroid_margin": -4.4397607822447785e-05,
+        "top1_importance_fraction": 0.2982040992522508,
+        "top20_importance_fraction": 0.9052188327355061,
+        "top20_deletion_logit_drop": 0.09477627717067805
+      },
+      {
+        "run_id": "transformer::backprop::covtype::7",
+        "architecture": "transformer",
+        "model": "backprop",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 7,
+        "classifier_accuracy": 0.621,
+        "total_parameter_count": 101781,
+        "fit_time_sec": 24.581554600037634,
+        "effective_rank": 4.023961704407964,
+        "centroid_margin": -0.023742559389595803,
+        "top1_importance_fraction": 0.7204868373326102,
+        "top20_importance_fraction": 0.9798869387461322,
+        "top20_deletion_logit_drop": 1.1610070616006851
+      },
+      {
+        "run_id": "mlp::closed-form::covtype::11",
+        "architecture": "mlp",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 11,
+        "classifier_accuracy": 0.649,
+        "total_parameter_count": 9126,
+        "fit_time_sec": 0.17422909999731928,
+        "effective_rank": 38.11453551205958,
+        "centroid_margin": -0.027545106523575762,
+        "top1_importance_fraction": 0.5583032625264146,
+        "top20_importance_fraction": 0.975025620392779,
+        "top20_deletion_logit_drop": 0.5138891129699206
+      },
+      {
+        "run_id": "mlp::backprop::covtype::11",
+        "architecture": "mlp",
+        "model": "backprop",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 11,
+        "classifier_accuracy": 0.748,
+        "total_parameter_count": 555527,
+        "fit_time_sec": 2.7032326000044122,
+        "effective_rank": 4.539121720595451,
+        "centroid_margin": 0.00678416238579841,
+        "top1_importance_fraction": 0.44613693319280656,
+        "top20_importance_fraction": 0.9288536431549737,
+        "top20_deletion_logit_drop": 6.880785658955574
+      },
+      {
+        "run_id": "transformer::closed-form::covtype::11",
+        "architecture": "transformer",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 11,
+        "classifier_accuracy": 0.5315,
+        "total_parameter_count": 53568,
+        "fit_time_sec": 329.4594948999584,
+        "effective_rank": 21.25580400966407,
+        "centroid_margin": -5.165451140635391e-05,
+        "top1_importance_fraction": 0.32401900807201217,
+        "top20_importance_fraction": 0.900508524845429,
+        "top20_deletion_logit_drop": 0.0883119973659112
+      },
+      {
+        "run_id": "transformer::backprop::covtype::11",
+        "architecture": "transformer",
+        "model": "backprop",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 11,
+        "classifier_accuracy": 0.63675,
+        "total_parameter_count": 101781,
+        "fit_time_sec": 25.92285540001467,
+        "effective_rank": 3.263828376629708,
+        "centroid_margin": -0.030001573648914353,
+        "top1_importance_fraction": 0.7020420358420377,
+        "top20_importance_fraction": 0.9910156497406524,
+        "top20_deletion_logit_drop": 1.446123406291008
+      },
+      {
+        "run_id": "mlp::closed-form::covtype::19",
+        "architecture": "mlp",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 19,
+        "classifier_accuracy": 0.65625,
+        "total_parameter_count": 9126,
+        "fit_time_sec": 0.15277350007090718,
+        "effective_rank": 1.000000007918267,
+        "centroid_margin": -0.024120921186353162,
+        "top1_importance_fraction": 0.5311061372248155,
+        "top20_importance_fraction": 0.9775778954729857,
+        "top20_deletion_logit_drop": 0.28389603438975697
+      },
+      {
+        "run_id": "mlp::backprop::covtype::19",
+        "architecture": "mlp",
+        "model": "backprop",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 19,
+        "classifier_accuracy": 0.74425,
+        "total_parameter_count": 555527,
+        "fit_time_sec": 2.782570599927567,
+        "effective_rank": 1.0000011462420424,
+        "centroid_margin": 0.007383675183184508,
+        "top1_importance_fraction": 0.46039005021674095,
+        "top20_importance_fraction": 0.9124268537206284,
+        "top20_deletion_logit_drop": 5.178501278162003
+      },
+      {
+        "run_id": "transformer::closed-form::covtype::19",
+        "architecture": "transformer",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 19,
+        "classifier_accuracy": 0.56,
+        "total_parameter_count": 53568,
+        "fit_time_sec": 332.9332043000031,
+        "effective_rank": 12.970813471087952,
+        "centroid_margin": -5.226724058226488e-05,
+        "top1_importance_fraction": 0.32073376256802827,
+        "top20_importance_fraction": 0.9091319578886101,
+        "top20_deletion_logit_drop": 0.0820051682026989
+      },
+      {
+        "run_id": "transformer::backprop::covtype::19",
+        "architecture": "transformer",
+        "model": "backprop",
+        "dataset": "covtype",
+        "suite": "feature-mask",
+        "seed": 19,
+        "classifier_accuracy": 0.63275,
+        "total_parameter_count": 101781,
+        "fit_time_sec": 24.596800099941902,
+        "effective_rank": 1.0046658948734242,
+        "centroid_margin": -0.027732252442862766,
+        "top1_importance_fraction": 0.714527631201677,
+        "top20_importance_fraction": 0.9942973870541338,
+        "top20_deletion_logit_drop": 2.3721964955329895
+      }
+    ],
+    "ood_table": [
+      {
+        "run_id": "mlp::closed-form::covtype::7",
+        "architecture": "mlp",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 7,
+        "shift": "feature-mask",
+        "accuracy": 0.60875
+      },
+      {
+        "run_id": "mlp::closed-form::covtype::7",
+        "architecture": "mlp",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 7,
+        "shift": "gaussian-noise",
+        "accuracy": 0.425
+      },
+      {
+        "run_id": "mlp::backprop::covtype::7",
+        "architecture": "mlp",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 7,
+        "shift": "feature-mask",
+        "accuracy": 0.633
+      },
+      {
+        "run_id": "mlp::backprop::covtype::7",
+        "architecture": "mlp",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 7,
+        "shift": "gaussian-noise",
+        "accuracy": 0.71875
+      },
+      {
+        "run_id": "transformer::closed-form::covtype::7",
+        "architecture": "transformer",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 7,
+        "shift": "feature-mask",
+        "accuracy": 0.52125
+      },
+      {
+        "run_id": "transformer::closed-form::covtype::7",
+        "architecture": "transformer",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 7,
+        "shift": "gaussian-noise",
+        "accuracy": 0.56225
+      },
+      {
+        "run_id": "transformer::backprop::covtype::7",
+        "architecture": "transformer",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 7,
+        "shift": "feature-mask",
+        "accuracy": 0.578
+      },
+      {
+        "run_id": "transformer::backprop::covtype::7",
+        "architecture": "transformer",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 7,
+        "shift": "gaussian-noise",
+        "accuracy": 0.62125
+      },
+      {
+        "run_id": "mlp::closed-form::covtype::11",
+        "architecture": "mlp",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 11,
+        "shift": "feature-mask",
+        "accuracy": 0.597
+      },
+      {
+        "run_id": "mlp::closed-form::covtype::11",
+        "architecture": "mlp",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 11,
+        "shift": "gaussian-noise",
+        "accuracy": 0.42275
+      },
+      {
+        "run_id": "mlp::backprop::covtype::11",
+        "architecture": "mlp",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 11,
+        "shift": "feature-mask",
+        "accuracy": 0.65075
+      },
+      {
+        "run_id": "mlp::backprop::covtype::11",
+        "architecture": "mlp",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 11,
+        "shift": "gaussian-noise",
+        "accuracy": 0.726
+      },
+      {
+        "run_id": "transformer::closed-form::covtype::11",
+        "architecture": "transformer",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 11,
+        "shift": "feature-mask",
+        "accuracy": 0.50625
+      },
+      {
+        "run_id": "transformer::closed-form::covtype::11",
+        "architecture": "transformer",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 11,
+        "shift": "gaussian-noise",
+        "accuracy": 0.53325
+      },
+      {
+        "run_id": "transformer::backprop::covtype::11",
+        "architecture": "transformer",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 11,
+        "shift": "feature-mask",
+        "accuracy": 0.58625
+      },
+      {
+        "run_id": "transformer::backprop::covtype::11",
+        "architecture": "transformer",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 11,
+        "shift": "gaussian-noise",
+        "accuracy": 0.63325
+      },
+      {
+        "run_id": "mlp::closed-form::covtype::19",
+        "architecture": "mlp",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 19,
+        "shift": "feature-mask",
+        "accuracy": 0.60125
+      },
+      {
+        "run_id": "mlp::closed-form::covtype::19",
+        "architecture": "mlp",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 19,
+        "shift": "gaussian-noise",
+        "accuracy": 0.26175
+      },
+      {
+        "run_id": "mlp::backprop::covtype::19",
+        "architecture": "mlp",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 19,
+        "shift": "feature-mask",
+        "accuracy": 0.6205
+      },
+      {
+        "run_id": "mlp::backprop::covtype::19",
+        "architecture": "mlp",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 19,
+        "shift": "gaussian-noise",
+        "accuracy": 0.7205
+      },
+      {
+        "run_id": "transformer::closed-form::covtype::19",
+        "architecture": "transformer",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 19,
+        "shift": "feature-mask",
+        "accuracy": 0.522
+      },
+      {
+        "run_id": "transformer::closed-form::covtype::19",
+        "architecture": "transformer",
+        "model": "closed-form",
+        "dataset": "covtype",
+        "seed": 19,
+        "shift": "gaussian-noise",
+        "accuracy": 0.55675
+      },
+      {
+        "run_id": "transformer::backprop::covtype::19",
+        "architecture": "transformer",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 19,
+        "shift": "feature-mask",
+        "accuracy": 0.58725
+      },
+      {
+        "run_id": "transformer::backprop::covtype::19",
+        "architecture": "transformer",
+        "model": "backprop",
+        "dataset": "covtype",
+        "seed": 19,
+        "shift": "gaussian-noise",
+        "accuracy": 0.6295
+      }
+    ]
+  },
+  "scaling_results": [],
+  "scaling_summary": [],
+  "scaling_fits": [],
+  "artifacts": {
+    "run_table": "C:\\Users\\DavWi\\Main\\Projekte\\vicreg_superlinear\\results\\json\\broader_eval_suite_run_table.jsonl",
+    "ood_table": "C:\\Users\\DavWi\\Main\\Projekte\\vicreg_superlinear\\results\\json\\broader_eval_suite_ood_table.jsonl",
+    "main_plot": null,
+    "scaling_plot": null
+  }
+}

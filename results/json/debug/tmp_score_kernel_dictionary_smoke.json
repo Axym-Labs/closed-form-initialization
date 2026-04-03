@@ -1,0 +1,89 @@
+{
+  "config": {
+    "dataset": "cifar10",
+    "suite": "random-affine",
+    "patch_size": 8,
+    "depth": 1,
+    "n_train": 256,
+    "n_test": 64,
+    "batch_size": 256,
+    "epochs": 20,
+    "lr": 0.0003,
+    "weight_decay": 0.05,
+    "head_reg": 100.0,
+    "lambda_reg": 1.0,
+    "num_landmarks": 8,
+    "num_heads": 4,
+    "analytic_num_heads": 2,
+    "mlp_ratio": 2.0,
+    "attention_kind": "landmark",
+    "attention_target": "mean",
+    "attention_rank": 8,
+    "local_sigma": 1.5,
+    "attention_power_iters": 12,
+    "attention_seed": -1,
+    "seed": 7,
+    "image_size": 32,
+    "in_chans": 3
+  },
+  "attention_kinds": [
+    "score-kernel-dictionary"
+  ],
+  "results": [
+    {
+      "model": "closed-form-transformer:score-kernel-dictionary",
+      "config": {
+        "dataset": "cifar10",
+        "suite": "random-affine",
+        "patch_size": 8,
+        "depth": 1,
+        "n_train": 256,
+        "n_test": 64,
+        "batch_size": 256,
+        "epochs": 20,
+        "lr": 0.0003,
+        "weight_decay": 0.05,
+        "head_reg": 100.0,
+        "lambda_reg": 1.0,
+        "num_landmarks": 8,
+        "num_heads": 4,
+        "analytic_num_heads": 2,
+        "mlp_ratio": 2.0,
+        "attention_kind": "score-kernel-dictionary",
+        "attention_target": "mean",
+        "attention_rank": 8,
+        "local_sigma": 1.5,
+        "attention_power_iters": 12,
+        "attention_seed": -1,
+        "seed": 7,
+        "image_size": 32,
+        "in_chans": 3
+      },
+      "classifier_accuracy": 0.125,
+      "layers": [
+        {
+          "depth": 1,
+          "classifier_accuracy": 0.125,
+          "attention_kind": "score-kernel-dictionary",
+          "attention_rank": 8,
+          "attention_mix_scale": 0.8110412656338775,
+          "selected_score_scales": {
+            "projector": {
+              "all": 0.5
+            },
+            "operator": {
+              "all": 6.0
+            }
+          },
+          "selected_prior_weight": null,
+          "train_fit_loss": 0.021499565991657553,
+          "top_shared_eigenvalue": 0.999901087932509
+        }
+      ],
+      "output_param_count": 1920,
+      "hidden_param_count": 149008,
+      "total_parameter_count": 150928,
+      "fit_time_sec": 4.296022900030948
+    }
+  ]
+}

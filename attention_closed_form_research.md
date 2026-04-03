@@ -721,6 +721,74 @@ That full result is the first principled analytic attention variant that clearly
 
 So the score objective and the score scale are coupled; once the routing directions are optimized in score space, tuning the score sharpness against the same downstream closed-form objective produces a meaningful extra gain.
 
+#### 4. Additional high-temperature idea scan
+
+I also tried a few looser meta-level ideas, mainly to see whether the mechanism wanted more novelty, more entropy, or more explicit information-gain style head selection.
+
+- `score-self-power-deflated-gain`
+  - greedy score-space power directions with token residual deflation after each extracted direction, as a crude information-gain surrogate
+  - reduced-data outcome: `0.099`
+- `token-self-maxent`
+  - keep the token-centered stable subspace, but flatten and mix directions inside that subspace to increase code entropy instead of using the top eigenvectors literally
+  - reduced-data outcome: `0.098`
+- `mixed-token-random`
+  - one stable token-statistics head plus one random novelty head at fixed total rank
+  - reduced-data outcome: `0.097`
+
+None of these justified a full-data promotion.
+
+The interpretation is useful anyway:
+
+- explicit residual-deflation did not improve over the simpler score-power solver once gain search was already present
+- maximum-entropy mixing inside the stable subspace by itself was not enough; without a score-level objective it mostly dilutes the useful routing structure
+- adding a random novelty head to a structured head did not help, so the random baseline is not just “useful noise” that can be trivially bolted onto a principled head
+
+#### 5. Robustness across data seeds
+
+After the `0.1290` full result for `score-self-power-gain`, I checked whether that improvement survived on new CIFAR-100 subsamples and augmentation seeds. On the full `10000 / 2000` setup, using seeds `7`, `11`, and `19`, the three-seed summaries were:
+
+- `spectral-self`: `[0.1225, 0.1105, 0.1100]`, mean `0.1143`
+- `spectral-self-token-stats`: `[0.1245, 0.1095, 0.1075]`, mean `0.1138`
+- `score-self-power`: `[0.1240, 0.1150, 0.1055]`, mean `0.1148`
+- `score-self-power-gain`: `[0.1290, 0.1140, 0.1070]`, mean `0.1167`
+- `score-self-power-bagged-gain`: `[0.1310, 0.1125, 0.1095]`, mean `0.1177`
+
+So the main score-space idea still looks best on average, and simple bagged projector averaging is the first stabilization trick that improves both the mean and the worst seed over the plain score-gain variant.
+
+Two more robustness checks matter:
+
+- a holdout-selected gain search produced the same chosen scales and the same accuracies as the train-fit gain search on the additional seeds I tested, so the brittleness does not seem to come mainly from the gain-selection rule
+- the simpler token-statistics objective was not obviously more stable than the score-space family, so dropping back to the weaker second-order objective does not fix the variance problem
+- bagged projector averaging helps, but only modestly, so the split sensitivity is reduced rather than solved
+
+The current reading is therefore:
+
+- the score-space objective is probably directionally correct
+- the fitted global gain still helps on average
+- bagged projector averaging is the best current robustness tweak
+- but the basis itself is still somewhat split-sensitive, and the true robust improvement is modest rather than dramatic
+
+#### 6. Further stabilization variants around bagging
+
+Once bagging helped, the next question was whether the remaining variance came from weak regularization of the bagged basis or from a few bad subset bases contaminating the average.
+
+- `score-self-power-bagged-shrink-gain`
+  - idea: keep the bagged score-space basis, but explicitly shrink it toward the more stable token-statistics eigenspace by searching a prior weight
+  - reduced-data outcome: `0.100`
+  - full seeds: `[0.1270, 0.1130, 0.1085]`, mean `0.1162`
+  - the model often selected strong late-layer shrinkage (`2.0` on the later layers for seeds `7` and `11`), so it does want some pull toward the stable eigenspace, but not enough to beat plain bagging; it is also much slower, with mean fit time around `993s` versus about `295s` for plain bagged averaging
+- `score-self-power-bagged-consensus-gain`
+  - idea: reweight the bagged subspaces by how strongly each bag agrees with the initial bagged consensus, so unstable bags are suppressed rather than averaged equally
+  - reduced-data outcome: `0.102`
+  - full seeds: `[0.1265, 0.1135, 0.1070]`, mean `0.1157`
+  - this slightly improves one hard split (`11`) but regresses on the others, so it is not a clean promotion over plain bagging
+
+These follow-ups sharpen the diagnosis:
+
+- the useful part of stabilization is averaging away bag noise
+- stronger regularization toward the token-statistics eigenspace gives up too much of the score-space advantage
+- consensus reweighting is sensible, but the plain objective-weighted bag average is already close to the best bias-variance point we have found so far
+
 #### Interpretation
 
 These experiments support the idea that attention needs a different optimality condition from the dense BT hidden map.
@@ -729,13 +797,439 @@ These experiments support the idea that attention needs a different optimality c
 - deriving `Q/K` from token-centered fluctuation statistics helps
 - directly optimizing view-stable centered score patterns helps more once the score scale is tuned against the downstream fit objective
 - attention quality depends not only on the subspace, but also on the effective score sharpness
-- the new score-space + gain-search variant is now the strongest principled attention mechanism tested here
+- bagged projector averaging is now the strongest robust score-space variant tested here
+- further stabilization around that bagged basis has not yet improved on it
 
 The strongest current principled variant is therefore:
 
-- `score-self-power-gain` at `0.1290` on the full run
+- `score-self-power-bagged-gain` at `0.1310` on the best full run, with three-seed mean `0.1177`
 
-with `spectral-self-token-stats` (`0.1245`) as the best purely second-order alternative.
+with `score-self-power-gain` (`0.1290`, mean `0.1167`) as the simpler non-bagged alternative, and `spectral-self-token-stats` (`0.1245`) as the best purely second-order alternative.
+
+#### 7. Bilinear score-operator heads
+
+The feature-direction parameterization used above is still restrictive. Even after moving to score-space objectives, each head is effectively built from a small set of feature directions and then scored by an inner product. That means the solved object is still a **feature subspace**, not an attention score operator.
+
+A cleaner closed-form relaxation is to solve directly for a symmetric bilinear score operator inside an analytic shared token subspace.
+
+Start from the token-centered paired statistics, whiten, and keep a shared basis \(U_r\) as before. For each sample \(n\) and view \(v\), define normalized projected tokens
+\[
+Y_n^{(v)} =
+\operatorname{normalize}\!\bigl(\tilde X_n^{(v)} \bar\Sigma^{-1/2} U_r\bigr)
+\in \mathbb R^{T \times r}.
+\]
+
+Instead of using only inner products \(Y Y^\top\), let one head be parameterized by a symmetric matrix \(M \in \mathbb R^{r \times r}\), giving score matrices
+\[
+S_n^{(v)}(M) = Y_n^{(v)} M Y_n^{(v)\top}.
+\]
+
+Then optimize cross-view score agreement:
+\[
+\max_{\|M\|_F = 1}
+\sum_n \langle S_n^{(1)}(M), S_n^{(2)}(M) \rangle_F.
+\]
+
+Writing
+\[
+A_n = Y_n^{(1)\top} Y_n^{(2)},
+\]
+the objective becomes
+\[
+\sum_n \operatorname{tr}(M A_n M A_n^\top).
+\]
+This is important because it defines a **linear self-adjoint operator on matrix space**:
+\[
+\mathcal L(M)
+=
+\frac{1}{2N}\sum_n \bigl(A_n M A_n^\top + A_n^\top M A_n\bigr),
+\]
+and
+\[
+\sum_n \operatorname{tr}(M A_n M A_n^\top)
+=
+N \langle M, \mathcal L(M) \rangle_F.
+\]
+
+So, unlike the older score-power direction search, the relaxed score-operator problem is an exact eigenproblem in operator space. In practice we can extract the top heads greedily by Frobenius-orthogonal power iteration over symmetric matrices \(M_h\).
+
+At application time, the head scores are
+\[
+\text{scores}_n^{(h)}
+=
+\gamma_h \, Y_n M_h Y_n^\top / \sqrt r,
+\qquad
+W_n^{(h)} = \operatorname{softmax}(\text{scores}_n^{(h)}),
+\]
+followed by the same ridge-solved output map on the concatenated contexts \(W_n^{(h)} V_n\).
+
+This is mathematically useful for the project because:
+
+- it is still analytic / greedy in the required sense
+- it remains single-stream at test time
+- it solves for the **attention kernel itself**, not just a feature projection that induces one
+- it is strictly more expressive than `spectral-self` at the same shared basis rank
+
+I implemented this family as:
+
+- `score-operator-self`
+- `score-operator-self-gain`
+
+Preliminary screen:
+
+- CIFAR-100, `random-affine`, `1024 / 256`, depth `3`, patch size `8`
+- `2` analytic heads, shared rank `8`
+
+Results:
+
+- `spectral-self`: `0.0820`
+- `score-self-power-gain`: `0.0898`
+- `score-operator-self-gain`: `0.0898`
+
+with the operator model following the same depth trajectory as the score-power model:
+
+- `0.0469 -> 0.0781 -> 0.0898`
+
+Interpretation:
+
+- the operator relaxation is already strong enough to beat the older plain spectral-self baseline on this nontrivial screen
+- it roughly matches the current non-bagged score-power family at the same small budget
+- the extra expressivity is therefore useful, but not yet enough to clearly beat the best score-space projector methods
+
+So this is not yet the final answer, but it is a real step toward a more defensible closed-form transformer parameterization: the fitted object is now an analytic multihead **score operator**, which is closer to what a transformer layer actually needs than a plain shared eigenspace.
+
+#### 8. Operator-space bagging and full-scale check
+
+Because the best previous robustness gain came from bagging, I also lifted that idea into operator space.
+
+For each bag:
+
+- keep the same full-data shared basis \(U_r\)
+- fit the symmetric operator heads \(M_h\) on a sample subset
+- flatten each \(M_h\) into matrix-space vectors
+- average the corresponding operator projectors across bags, with a small prior toward the non-bagged full-data operator basis
+
+So this is the matrix-space analogue of projector averaging:
+
+- projector bagging for score-power heads averages feature-subspace projectors
+- operator bagging averages **score-operator subspace projectors**
+
+Implemented variant:
+
+- `score-operator-self-bagged-gain`
+
+Mid-scale check (`1024 / 256`, CIFAR-100, depth `3`, patch size `8`, `2` heads, rank `8`):
+
+- `score-operator-self-gain`: `0.0898`
+- `score-operator-self-bagged-gain`: `0.0938`
+- `score-self-power-bagged-gain`: `0.0938`
+
+So bagging does transfer to operator space on the smaller screen, and it closes the gap to the best stabilized projector-based family there.
+
+Full-scale check (`10000 / 2000`, CIFAR-100, depth `3`, patch size `8`, `2` analytic heads, default rank `16`):
+
+- `score-operator-self-gain`, seed `7`: `0.1270`
+- `score-operator-self-bagged-gain`, seeds `[7, 11, 19]`: `[0.1280, 0.1160, 0.1040]`
+  - mean: `0.1160`
+  - min/max: `0.1040 / 0.1280`
+
+Comparison to the current strongest projector-based family:
+
+- `score-self-power-bagged-gain`: best run `0.1310`, mean `0.1177`, worst seed `0.1095`
+
+Interpretation:
+
+- the operator family is viable at full scale; it clearly beats the older `spectral-self` baseline and lands close to `score-self-power-gain`
+- bagging helps the operator family a little on the good seed (`0.1270 -> 0.1280`) and on the smaller-data screen
+- but the three-seed full mean (`0.1160`) and worst seed (`0.1040`) remain below the bagged projector family
+
+That matters diagnostically.
+
+- direct score-operator fitting is **not** a dead end
+- but the main robustness issue is probably not solved just by moving from feature directions to bilinear operators
+- projector-space bagging still seems to regularize the useful inductive bias better than operator-space bagging in the current implementation
+
+So the operator formulation is now a serious intermediate result, but not yet the new best robust recipe. The current best practical recipe remains the projector-based score-space family, while the operator family remains valuable as a more faithful closed-form approximation to what transformer attention is actually parameterizing.
+
+#### 9. Two broader architecture checks that did not promote
+
+To avoid over-specializing too early, I also tested two more general analytic layer designs.
+
+##### 9.1 Kernel dictionary layer
+
+Idea:
+
+- run the best bagged score-power branch and the best bagged score-operator branch in parallel
+- concatenate their attended contexts
+- solve one closed-form ridge readout on top
+
+This is the cleanest closed-form analogue of a multi-kernel transformer block: multiple analytic routing families in parallel, one solved output map.
+
+Matched-budget split test (`1024 / 256`, CIFAR-100, depth `3`, patch size `8`, total rank `8`, `2` total heads split across branches):
+
+- `score-kernel-dictionary`: `0.0820`
+
+This was clearly worse than either stabilized branch alone:
+
+- `score-self-power-bagged-gain`: `0.0938`
+- `score-operator-self-bagged-gain`: `0.0938`
+
+I also checked the looser version with a full projector branch plus a full operator branch in parallel rather than splitting the budget, and that was worse still on the same reduced screen.
+
+Interpretation:
+
+- naive kernel-family concatenation does **not** automatically create complementary signal
+- the two branches appear to compete rather than help when combined this directly
+- so the next closed-form step is not just “add more analytic kernels in parallel”
+
+##### 9.2 Diagonal metric in the robust projector basis
+
+Idea:
+
+- keep the robust bagged score-power basis
+- inside each head subspace, replace the fixed dot-product metric by a solved diagonal score operator
+- for a head cross-moment \(A_n\), this gives the exact quadratic form
+\[
+\max_{\|d\|=1} \sum_n d^\top (A_n \odot A_n) d,
+\]
+so the head metric is the top eigenvector of the symmetric average of \(A_n \odot A_n\)
+
+This is mathematically attractive because it is:
+
+- more expressive than a fixed inner product
+- much more constrained than a full bilinear operator
+- still an exact eigensystem rather than a heuristic iterative fit
+
+Reduced-data outcome (`1024 / 256`, CIFAR-100, depth `3`, patch size `8`, `2` heads, rank `8`):
+
+- `score-metric-self-bagged-gain`: `0.0859`
+
+So the diagonal-metric relaxation did improve over the weaker older spectral baseline, but it still failed to match the best stabilized projector or operator families.
+
+Interpretation:
+
+- allowing a solved metric inside the robust basis is not enough by itself
+- the main benefit of the best current projector family is not just that the metric is too rigid
+- so the bottleneck is likely in the routing basis itself and in its stability, not only in the local score metric inside a fixed basis
+
+These two negative results are useful because they narrow the plausible next moves:
+
+- simple branch concatenation is not the answer
+- simple diagonal metric relaxation is not the answer
+- the most credible remaining direction is still to improve the stability of the score-space basis itself, or to find a more structured operator class that preserves the projector family’s robustness instead of replacing it
+
+##### 9.3 Full operator inside the robust projector basis
+
+There was one more structured follow-up worth checking before abandoning the operator idea.
+
+Instead of fitting bilinear score operators in the original token-statistics basis, fit them inside the **already stabilized bagged score-power basis**. That gives:
+
+- the robust projector family for basis selection
+- a full bilinear score operator only inside that stable basis
+
+Implemented variant:
+
+- `score-operator-projector-basis-gain`
+
+Reduced-data check (`2048 / 512`, CIFAR-100, depth `3`, patch size `8`, `2` heads, rank `16`):
+
+- `score-operator-projector-basis-gain`: `0.0938`
+- `score-self-power-bagged-gain`: `0.0977`
+
+So it stays competitive, but does not beat the projector baseline even on the reduced screen.
+
+Full-scale seed-`7` check (`10000 / 2000`, CIFAR-100, depth `3`, patch size `8`, `2` heads, rank `16`):
+
+- `score-operator-projector-basis-gain`: `0.1260`
+- reference `score-self-power-bagged-gain`: `0.1310`
+
+Interpretation:
+
+- moving operator expressivity into the stable projector basis is much more sensible than fitting operators in the raw shared eigenspace
+- but even then, the extra bilinear freedom still does not improve on the simpler projector family
+- this reinforces the view that the strongest current mechanism is the stabilized score-space basis itself, not a richer local operator on top of that basis
+
+##### 9.4 Joint head-subspace block power
+
+Another plausible criticism of the current best family is that it extracts score directions **greedily one vector at a time**. A natural fix is to optimize each head subspace jointly.
+
+For a symmetric per-sample score moment \(A_n\), define a rank-\(r_h\) head subspace \(U_h\) by
+\[
+\max_{U_h^\top U_h = I} \sum_n \|U_h^\top A_n U_h\|_F^2.
+\]
+
+This is the direct block-subspace analogue of the rank-1 score-power objective:
+
+- rank `1`: recover the old scalar score-power objective
+- rank `r_h > 1`: optimize the whole head subspace jointly rather than direction-by-direction
+
+I implemented a block-power style solver for this objective, including a bagged version:
+
+- `score-self-block-gain`
+- `score-self-block-bagged-gain`
+
+Reduced-data check (`2048 / 512`, CIFAR-100, depth `3`, patch size `8`, `2` heads, rank `16`):
+
+- `score-self-block-bagged-gain`: `0.0840`
+- `score-self-power-bagged-gain`: `0.0977`
+
+So the joint head-subspace objective is clearly worse than the greedy score-power basis.
+
+Interpretation:
+
+- the problem is **not** simply that greedy direction extraction is too myopic
+- the ordered, anisotropic structure created by greedy extraction seems to be useful rather than harmful
+- at least in the current setup, jointly optimizing a whole head subspace washes out some of the directional structure that the downstream analytic attention block is able to exploit
+
+##### 9.5 Direction-preserving bagging
+
+Another natural idea was that the current projector bagging might be losing too much information because it averages **unordered projectors** rather than ordered greedy directions.
+
+I therefore added an alignment-preserving bagging variant:
+
+- fit the full-data greedy score-power basis as a reference
+- fit bagged greedy bases on subsets
+- align each bag basis back to the reference before averaging
+- then run the same closed-form score-scale search and ridge readout
+
+Implemented variant:
+
+- `score-self-power-aligned-bagged-gain`
+
+Reduced-data check (`2048 / 512`, CIFAR-100, depth `3`, patch size `8`, `2` heads, rank `16`):
+
+- `score-self-power-aligned-bagged-gain`: `0.0840`
+- `score-self-power-bagged-gain`: `0.0977`
+
+So preserving ordered direction structure through this kind of basis alignment does **not** help. In fact it is clearly worse than the simpler projector average.
+
+Interpretation:
+
+- the useful stabilization from bagging does not come from preserving a single canonical ordered basis across bags
+- averaging at the projector level may be crude, but it is apparently regularizing away unstable directional detail that the aligned average keeps and amplifies
+
+##### 9.6 Bagging schedule sweep
+
+Since basis stabilization still looks like the main lever, I also exposed the bagging schedule itself in the transformer runner and ran a reduced-data sweep for the current best family:
+
+- family: `score-self-power-bagged-gain`
+- dataset: CIFAR-100
+- train/test: `2048 / 512`
+- depth `3`, patch size `8`, `2` heads, rank `16`
+
+Schedules tested:
+
+- bags `4`, fraction `0.7`: `0.0977`
+- bags `6`, fraction `0.5`: `0.0957`
+- bags `8`, fraction `0.5`: `0.0977`
+- bags `8`, fraction `0.85`: `0.0938`
+- bags `12`, fraction `0.5`: `0.0977`
+- bags `12`, fraction `0.3`: `0.0762`
+
+Interpretation:
+
+- more bags with moderately smaller fractions can **match** the current default
+- they do not clearly improve on it
+- very small bag fractions are harmful
+- very large overlapping bags are also somewhat worse
+
+So the default bagging recipe was not dramatically mistuned. The bagging schedule matters, but it does not appear to be the hidden source of a new performance jump.
+
+#### 10. Practical tuning around the current best recipe
+
+After the architectural detours above, I ran a direct tuning pass around the strongest robust family:
+
+- `score-self-power-bagged-gain`
+
+All results below use CIFAR-100 with `random-affine`.
+
+##### 10.1 Head count and total rank
+
+Reduced-data screen (`2048 / 512`, depth `3`, patch size `8`):
+
+- heads `2`, rank `8`: `0.0801`
+- heads `2`, rank `16`: `0.0977`
+- heads `2`, rank `24`: `0.0859`
+- heads `2`, rank `32`: `0.0918`
+- heads `4`, rank `16`: `0.0918`
+- heads `4`, rank `24`: `0.0898`
+- heads `4`, rank `32`: `0.0898`
+- heads `8`, rank `32`: `0.0840`
+
+Interpretation:
+
+- the best setting in this scan is still **`2` heads with total rank `16`**
+- increasing total rank beyond `16` hurts
+- splitting the same or larger rank across more heads also hurts
+
+So the robust recipe does **not** currently want “more transformer-ness” in the form of many analytic heads.
+
+##### 10.2 Depth
+
+Keeping the best reduced-data configuration (`2` heads, rank `16`, patch size `8`):
+
+- depth `3`: `0.0977`
+- depth `4`: `0.0957`
+- depth `5`: `0.0996`
+
+So on the reduced screen, extra depth is not monotone but depth `5` slightly edges out depth `3`.
+
+However, on the full `10000 / 2000` seed-`7` run:
+
+- depth `3`: `0.1310`
+- depth `5`: `0.1265`
+
+So the extra depth does **not** survive promotion to the full run. The best full configuration remains depth `3`.
+
+##### 10.3 Patch size
+
+Keeping the best score-space family and reduced-data screen (`2048 / 512`, depth `3`, `2` heads, rank `16`):
+
+- patch size `4`: `0.0547`
+- patch size `8`: `0.0977`
+- patch size `16`: `0.0938`
+
+Interpretation:
+
+- `patch_size = 8` remains the best operating point
+- smaller patches create many more tokens but do not help this analytic attention family
+- larger patches preserve more per-token channel structure and are less catastrophic than patch `4`, but still do not beat patch `8`
+
+So the current bottleneck is not simply “too few tokens”.
+
+##### 10.4 Readout target
+
+Again using the best reduced-data configuration (`2048 / 512`, depth `3`, patch size `8`, `2` heads, rank `16`):
+
+- target `mean`: `0.0977`
+- target `cross`: `0.0859`
+- target `mean-centered`: `0.0820`
+- target `residual-centered`: `0.0840`
+
+So the original conclusion still holds even for the strongest stabilized score-space family:
+
+- the paired **mean** target remains the best analytic target
+
+#### Practical conclusion
+
+After these follow-ups, the strongest practical recipe is still:
+
+- attention family: `score-self-power-bagged-gain`
+- target: `mean`
+- patch size: `8`
+- depth: `3`
+- analytic heads: `2`
+- total rank: `16`
+
+This is useful because it rules out a large number of nearby alternatives:
+
+- more heads are not helping
+- larger rank is not helping
+- deeper stacks are not helping on the full run
+- different patch granularities are not helping
+- alternative targets are not helping
+
+So the path forward is now clearer. If the project is to make another significant jump, it will probably have to come from a better **basis-stabilization principle** rather than from local hyperparameter tuning or from simply adding operator flexibility.
 
 ### Why pure cross-attention does not fit cleanly here
 
@@ -1109,4 +1603,5 @@ For our project, the most coherent route is still:
 \text{closed-form token-token self-attention hidden path}.
 \]
 
-Empirically, closed-form self-attention is better than pure landmark retrieval and much better than fully untrained random routing, so the operator family is meaningful. The best current principled recipe is now a **score-space power objective plus a fitted score gain**, which reaches `0.1290` on the full CIFAR-100 transformer run. That is still far from the learned ViT baseline, but it is the first analytic attention variant here that clearly beats both the old spectral baseline and the random-ridge reference. The remaining challenge is to make that gain more robust and to understand whether the advantage comes from a genuinely better routing geometry or from a better-conditioned score distribution.
+Empirically, closed-form self-attention is better than pure landmark retrieval and much better than fully untrained random routing, so the operator family is meaningful. The best current principled recipe is a **score-space power objective plus a fitted score gain**. Its best full run reaches `0.1290`, and across the three full seeds tested so far it has the best mean (`0.1167`) among the analytic variants compared in this note. That is still far from the learned ViT baseline, and the seed-to-seed variation is substantial. So the main challenge now is not to invent attention from scratch anymore, but to make the score-space mechanism more robust and to understand whether its gain comes from a genuinely better routing geometry or from a better-conditioned score distribution.
+Empirically, closed-form self-attention is better than pure landmark retrieval and much better than fully untrained random routing, so the operator family is meaningful. The best current robust recipe is now **score-space power directions plus bagged projector averaging and fitted score gain**. Its best full run reaches `0.1310`, and across the three full seeds tested so far it has the best mean (`0.1177`) and best worst-seed accuracy (`0.1095`) among the analytic variants compared in this note. The simpler non-bagged score-space + gain variant is still close (`0.1290` best run, `0.1167` mean), while additional stabilization around the bagged basis has not improved on plain bagging. That is still far from the learned ViT baseline, and the seed-to-seed variation remains substantial. So the main challenge now is not to invent attention from scratch anymore, but to stabilize the score-space routing basis without washing out the score-level structure that makes it useful in the first place.

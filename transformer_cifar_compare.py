@@ -46,12 +46,31 @@ ATTENTION_KINDS = [
     "spectral-self-token-centered",
     "spectral-self-interleaved",
     "spectral-self-whitened",
+    "score-operator-self",
+    "score-operator-self-gain",
+    "score-operator-self-bagged-gain",
+    "score-kernel-dictionary",
+    "score-metric-self-bagged-gain",
+    "score-operator-projector-basis-gain",
+    "score-self-block-gain",
+    "score-self-block-bagged-gain",
+    "score-self-power-aligned-bagged-gain",
     "score-self-power",
     "score-self-power-gain",
     "score-self-power-headgain",
+    "score-self-power-deflated-gain",
+    "score-self-cosine-gain",
+    "score-self-power-multistart-gain",
+    "score-self-power-holdout-gain",
+    "score-self-power-bagged-gain",
+    "score-self-power-bagged-shrink-gain",
+    "score-self-power-bagged-consensus-gain",
     "score-self-power-raw",
     "mixed-self-objective",
     "mixed-self-objective-gain",
+    "token-self-maxent",
+    "mixed-token-random",
+    "head-pool-gain",
     "random-self-ridge",
     "random-self-untrained",
     "cca-self",
@@ -92,6 +111,8 @@ class TransformerConfig:
     attention_rank: int = 0
     local_sigma: float = LOCAL_SIGMA
     attention_power_iters: int = 8
+    attention_num_bags: int = 4
+    attention_bag_fraction: float = 0.7
     attention_seed: int = -1
     seed: int = SEED
     image_size: int = 32
@@ -388,6 +409,111 @@ def fit_attention_block(config, view1_tr, view2_tr):
             num_power_iters=config.attention_power_iters,
             seed=config.resolved_attention_seed,
         )
+    if config.attention_kind == "score-operator-self":
+        return cfatt.fit_score_operator_self_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "score-operator-self-gain":
+        return cfatt.fit_score_operator_self_attention_scaled_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "score-operator-self-bagged-gain":
+        return cfatt.fit_score_operator_self_attention_bagged_scaled_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+            num_bags=config.attention_num_bags,
+            bag_fraction=config.attention_bag_fraction,
+        )
+    if config.attention_kind == "score-kernel-dictionary":
+        return cfatt.fit_score_kernel_dictionary_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "score-metric-self-bagged-gain":
+        return cfatt.fit_score_metric_bagged_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "score-operator-projector-basis-gain":
+        return cfatt.fit_score_operator_on_projector_basis_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "score-self-block-gain":
+        return cfatt.fit_score_blockpower_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "score-self-block-bagged-gain":
+        return cfatt.fit_score_blockpower_bagged_gain_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+            num_bags=config.attention_num_bags,
+            bag_fraction=config.attention_bag_fraction,
+        )
+    if config.attention_kind == "score-self-power-aligned-bagged-gain":
+        return cfatt.fit_score_power_aligned_bagged_gain_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+            num_bags=config.attention_num_bags,
+            bag_fraction=config.attention_bag_fraction,
+        )
     if config.attention_kind == "score-self-power-gain":
         return cfatt.fit_score_power_scaled_self_attention_from_token_pairs(
             view1_tr,
@@ -410,6 +536,89 @@ def fit_attention_block(config, view1_tr, view2_tr):
             num_power_iters=config.attention_power_iters,
             seed=config.resolved_attention_seed,
         )
+    if config.attention_kind == "score-self-power-deflated-gain":
+        return cfatt.fit_score_power_deflated_scaled_self_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "score-self-cosine-gain":
+        return cfatt.fit_score_cosine_scaled_self_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "score-self-power-multistart-gain":
+        return cfatt.fit_score_power_multistart_gain_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "score-self-power-holdout-gain":
+        return cfatt.fit_score_power_holdout_gain_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "score-self-power-bagged-gain":
+        return cfatt.fit_score_power_bagged_gain_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+            num_bags=config.attention_num_bags,
+            bag_fraction=config.attention_bag_fraction,
+        )
+    if config.attention_kind == "score-self-power-bagged-shrink-gain":
+        return cfatt.fit_score_power_bagged_shrink_gain_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+            num_bags=config.attention_num_bags,
+            bag_fraction=config.attention_bag_fraction,
+        )
+    if config.attention_kind == "score-self-power-bagged-consensus-gain":
+        return cfatt.fit_score_power_bagged_consensus_gain_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+            num_bags=config.attention_num_bags,
+            bag_fraction=config.attention_bag_fraction,
+        )
     if config.attention_kind == "score-self-power-raw":
         return cfatt.fit_score_power_raw_self_attention_from_token_pairs(
             view1_tr,
@@ -419,6 +628,16 @@ def fit_attention_block(config, view1_tr, view2_tr):
             num_heads=config.resolved_analytic_heads,
             target_mode=config.attention_target,
             num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "token-self-maxent":
+        return cfatt.fit_token_maxent_self_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
             seed=config.resolved_attention_seed,
         )
     if config.attention_kind == "mixed-self-objective":
@@ -434,6 +653,27 @@ def fit_attention_block(config, view1_tr, view2_tr):
         )
     if config.attention_kind == "mixed-self-objective-gain":
         return cfatt.fit_mixed_self_objective_scaled_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            num_power_iters=config.attention_power_iters,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "mixed-token-random":
+        return cfatt.fit_mixed_token_random_attention_from_token_pairs(
+            view1_tr,
+            view2_tr,
+            lambda_reg=config.lambda_reg,
+            total_rank=config.analytic_attention_rank,
+            num_heads=config.resolved_analytic_heads,
+            target_mode=config.attention_target,
+            seed=config.resolved_attention_seed,
+        )
+    if config.attention_kind == "head-pool-gain":
+        return cfatt.fit_head_pool_gain_attention_from_token_pairs(
             view1_tr,
             view2_tr,
             lambda_reg=config.lambda_reg,
@@ -548,15 +788,53 @@ def apply_attention_block(tokens, config, att_model):
         return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
     if config.attention_kind == "score-self-power":
         return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "score-operator-self":
+        return token_layer_norm(cfatt.apply_score_operator_attention(tokens, att_model))
+    if config.attention_kind == "score-operator-self-gain":
+        return token_layer_norm(cfatt.apply_score_operator_attention(tokens, att_model))
+    if config.attention_kind == "score-operator-self-bagged-gain":
+        return token_layer_norm(cfatt.apply_score_operator_attention(tokens, att_model))
+    if config.attention_kind == "score-kernel-dictionary":
+        return token_layer_norm(cfatt.apply_score_kernel_dictionary_attention(tokens, att_model))
+    if config.attention_kind == "score-metric-self-bagged-gain":
+        return token_layer_norm(cfatt.apply_score_operator_attention(tokens, att_model))
+    if config.attention_kind == "score-operator-projector-basis-gain":
+        return token_layer_norm(cfatt.apply_score_operator_attention(tokens, att_model))
+    if config.attention_kind == "score-self-block-gain":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "score-self-block-bagged-gain":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "score-self-power-aligned-bagged-gain":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
     if config.attention_kind == "score-self-power-gain":
         return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
     if config.attention_kind == "score-self-power-headgain":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "score-self-power-deflated-gain":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "score-self-cosine-gain":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "score-self-power-multistart-gain":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "score-self-power-holdout-gain":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "score-self-power-bagged-gain":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "score-self-power-bagged-shrink-gain":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "score-self-power-bagged-consensus-gain":
         return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
     if config.attention_kind == "score-self-power-raw":
         return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
     if config.attention_kind == "mixed-self-objective":
         return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
     if config.attention_kind == "mixed-self-objective-gain":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "token-self-maxent":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "mixed-token-random":
+        return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
+    if config.attention_kind == "head-pool-gain":
         return token_layer_norm(cfatt.apply_spectral_self_attention(tokens, att_model))
     if config.attention_kind in {"random-self-ridge", "random-self-untrained"}:
         return token_layer_norm(cfatt.apply_random_self_attention(tokens, att_model))
@@ -643,6 +921,9 @@ def run_closed_form_transformer(config):
                     att_model.get("landmark_count", att_model.get("projection_rank", config.num_landmarks))
                 ),
                 "attention_mix_scale": float(att_model.get("mix_scale", 0.0)),
+                "selected_score_scales": att_model.get("selected_score_scales"),
+                "selected_prior_weight": att_model.get("selected_prior_weight"),
+                "train_fit_loss": float(att_model["train_fit_loss"]) if "train_fit_loss" in att_model else None,
                 "top_shared_eigenvalue": top_shared_eigenvalue,
             }
         )
@@ -776,6 +1057,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--num-landmarks", type=int, default=NUM_LANDMARKS)
     parser.add_argument("--analytic-heads", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=SEED)
     parser.add_argument("--attention-kind", default="landmark", choices=ATTENTION_KINDS + ["all"])
     parser.add_argument(
         "--attention-target",
@@ -785,6 +1067,8 @@ def main():
     parser.add_argument("--attention-rank", type=int, default=0)
     parser.add_argument("--local-sigma", type=float, default=LOCAL_SIGMA)
     parser.add_argument("--attention-power-iters", type=int, default=8)
+    parser.add_argument("--attention-num-bags", type=int, default=4)
+    parser.add_argument("--attention-bag-fraction", type=float, default=0.7)
     parser.add_argument("--attention-seed", type=int, default=-1)
     parser.add_argument("--skip-learned", action="store_true")
     parser.add_argument("--json-out", type=Path, default=None)
@@ -805,7 +1089,10 @@ def main():
         attention_rank=args.attention_rank,
         local_sigma=args.local_sigma,
         attention_power_iters=args.attention_power_iters,
+        attention_num_bags=args.attention_num_bags,
+        attention_bag_fraction=args.attention_bag_fraction,
         attention_seed=args.attention_seed,
+        seed=args.seed,
     )
 
     attention_kinds = expand_attention_kinds(args.attention_kind)
