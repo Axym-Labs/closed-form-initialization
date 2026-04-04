@@ -27,6 +27,11 @@ from project_paths import default_json_path, default_plot_path, resolve_json_pat
 
 MAIN_SEEDS = [7, 11, 19]
 SCALING_SEEDS = [7, 11]
+SCALING_DATA_VALUES = [1000, 2000, 4000, 8000]
+SCALING_MLP_WIDTHS = [128, 256, 512, 1024]
+SCALING_TRANSFORMER_PATCH_SIZES = [2, 4, 8, 16]
+SCALING_MLP_COMPUTE_DEPTHS = [1, 2, 4, 8, 16]
+SCALING_TRANSFORMER_COMPUTE_DEPTHS = [1, 2, 4, 8]
 
 MLP_CANDIDATES = [
     "closed-form-barlow",
@@ -1754,9 +1759,8 @@ def scaling_specs_for_axis(dataset_name, axis_name, seeds):
     base = DATASET_REGISTRY[dataset_name]
     specs = []
     if axis_name == "data":
-        values = [1000, 2000, 4000, 8000]
         for seed in seeds:
-            for value in values:
+            for value in SCALING_DATA_VALUES:
                 specs.append(
                     DatasetSpec(
                         name=dataset_name,
@@ -1766,7 +1770,7 @@ def scaling_specs_for_axis(dataset_name, axis_name, seeds):
                         seed=seed,
                     )
                 )
-        return values, specs
+        return SCALING_DATA_VALUES, specs
 
     if axis_name in {"parameters", "compute"}:
         for seed in seeds:
@@ -1780,8 +1784,14 @@ def scaling_specs_for_axis(dataset_name, axis_name, seeds):
                 )
             )
         if axis_name == "parameters":
-            return [128, 256, 512, 1024], specs
-        return [1, 2, 3, 4], specs
+            return {
+                "mlp": SCALING_MLP_WIDTHS,
+                "transformer": SCALING_TRANSFORMER_PATCH_SIZES,
+            }, specs
+        return {
+            "mlp": SCALING_MLP_COMPUTE_DEPTHS,
+            "transformer": SCALING_TRANSFORMER_COMPUTE_DEPTHS,
+        }, specs
 
     raise ValueError(f"Unknown scaling axis: {axis_name}")
 
@@ -1815,7 +1825,7 @@ def run_scaling_suite(dataset_name, mlp_winner, transformer_winner, mlp_config, 
         elif axis_name == "parameters":
             for spec in dataset_specs:
                 bundle = load_dataset_bundle(spec)
-                for width in scale_values:
+                for width in scale_values["mlp"]:
                     mlp_cfg = MLPEvalConfig(**{**asdict(mlp_config), "width": width})
                     mlp_row = run_closed_form_mlp(bundle, mlp_winner, mlp_cfg, spec.seed)
                     mlp_row["axis"] = axis_name
@@ -1826,7 +1836,7 @@ def run_scaling_suite(dataset_name, mlp_winner, transformer_winner, mlp_config, 
                     mlp_bp["scale_value"] = width
                     rows.append(mlp_bp)
 
-                for patch_size in [2, 4, 8, 16]:
+                for patch_size in scale_values["transformer"]:
                     tr_cfg = TransformerEvalConfig(**{**asdict(transformer_config), "patch_size": patch_size})
                     tr_row = run_closed_form_transformer(bundle, transformer_winner, tr_cfg, spec.seed)
                     tr_row["axis"] = axis_name
@@ -1840,7 +1850,7 @@ def run_scaling_suite(dataset_name, mlp_winner, transformer_winner, mlp_config, 
         elif axis_name == "compute":
             for spec in dataset_specs:
                 bundle = load_dataset_bundle(spec)
-                for depth in scale_values:
+                for depth in scale_values["mlp"]:
                     mlp_cfg = MLPEvalConfig(**{**asdict(mlp_config), "depth": depth})
                     mlp_row = run_closed_form_mlp(bundle, mlp_winner, mlp_cfg, spec.seed)
                     mlp_row["axis"] = axis_name
@@ -1851,7 +1861,7 @@ def run_scaling_suite(dataset_name, mlp_winner, transformer_winner, mlp_config, 
                     mlp_bp["scale_value"] = depth
                     rows.append(mlp_bp)
 
-                for depth in scale_values:
+                for depth in scale_values["transformer"]:
                     tr_cfg = TransformerEvalConfig(**{**asdict(transformer_config), "depth": depth})
                     tr_row = run_closed_form_transformer(bundle, transformer_winner, tr_cfg, spec.seed)
                     tr_row["axis"] = axis_name
