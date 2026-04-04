@@ -1,0 +1,68 @@
+{
+  "rows": [
+    {
+      "dataset": "wikitext2_next_token",
+      "seed": 7,
+      "method": "spectral-self",
+      "attention_power_iters": null,
+      "classifier_accuracy": 0.171,
+      "fit_time_sec": 110.3325376000721,
+      "wall_clock_sec": 111.15037929988466,
+      "total_parameter_count": 838656,
+      "compute_proxy": 203343003648.0,
+      "layer_accuracies": [
+        0.177,
+        0.17133333333333334,
+        0.171
+      ]
+    },
+    {
+      "dataset": "wikitext2_next_token",
+      "seed": 7,
+      "method": "score-self-power-gain",
+      "attention_power_iters": 4,
+      "classifier_accuracy": 0.171,
+      "fit_time_sec": 137.9712833999656,
+      "wall_clock_sec": 138.8283325000666,
+      "total_parameter_count": 838656,
+      "compute_proxy": 253674651648.0,
+      "layer_accuracies": [
+        0.177,
+        0.172,
+        0.171
+      ]
+    },
+    {
+      "dataset": "wikitext2_next_token",
+      "seed": 7,
+      "method": "score-self-power-gain",
+      "attention_power_iters": 12,
+      "classifier_accuracy": 0.17133333333333334,
+      "fit_time_sec": 149.00467819999903,
+      "wall_clock_sec": 149.81788370013237,
+      "total_parameter_count": 838656,
+      "compute_proxy": 354337947648.0,
+      "layer_accuracies": [
+        0.177,
+        0.172,
+        0.17133333333333334
+      ]
+    },
+    {
+      "dataset": "wikitext2_next_token",
+      "seed": 7,
+      "method": "score-self-power-gain",
+      "attention_power_iters": 24,
+      "classifier_accuracy": 0.17133333333333334,
+      "fit_time_sec": 156.52001580013894,
+      "wall_clock_sec": 157.2932190001011,
+      "total_parameter_count": 838656,
+      "compute_proxy": 505332891648.0,
+      "layer_accuracies": [
+        0.177,
+        0.172,
+        0.17133333333333334
+      ]
+    }
+  ]
+}

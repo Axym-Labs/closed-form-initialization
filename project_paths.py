@@ -27,7 +27,9 @@ def resolve_json_path(path: Path) -> Path:
 
 
 def default_plot_path(filename: str) -> Path:
-    return ensure_dir(PLOT_RESULTS_DIR) / filename
+    path = ensure_dir(PLOT_RESULTS_DIR) / Path(filename)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def resolve_plot_path(path: Path) -> Path:

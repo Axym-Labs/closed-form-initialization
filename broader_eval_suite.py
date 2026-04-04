@@ -5,7 +5,7 @@ import math
 import re
 import time
 from collections import Counter, defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 
@@ -27,11 +27,9 @@ from project_paths import default_json_path, default_plot_path, resolve_json_pat
 
 MAIN_SEEDS = [7, 11, 19]
 SCALING_SEEDS = [7, 11]
-SCALING_DATA_VALUES = [1000, 2000, 4000, 8000]
-SCALING_MLP_WIDTHS = [128, 256, 512, 1024]
-SCALING_TRANSFORMER_PATCH_SIZES = [2, 4, 8, 16]
-SCALING_MLP_COMPUTE_DEPTHS = [1, 2, 4, 8, 16]
-SCALING_TRANSFORMER_COMPUTE_DEPTHS = [1, 2, 4, 8]
+SCALING_DATA_VALUES = [2000, 4000, 8000, 16000]
+SCALING_TRANSFORMER_TEXT_DIMS = [32, 64, 96, 128]
+SCALING_TRANSFORMER_CONTEXT_LENGTHS = [8, 16, 32, 48]
 
 MLP_CANDIDATES = [
     "closed-form-barlow",
@@ -39,20 +37,27 @@ MLP_CANDIDATES = [
     "whitened-shared-pca",
 ]
 DEFAULT_MLP_WINNER = "closed-form-barlow"
+DEFAULT_MLP_CONFIG_OVERRIDES = {
+    "dual_mapping": True,
+    "output_source": "post-hidden",
+    "center_after_hidden": False,
+}
 
-TRANSFORMER_CANDIDATES = [
-    "spectral-self",
-    "spectral-self-token-stats",
-    "spectral-self-whitened",
-    "score-self-power-bagged-gain",
-    "score-self-power-bagged-consensus-gain",
-]
+TRANSFORMER_CANDIDATES = ["spectral-self"]
 DEFAULT_TRANSFORMER_WINNER = "spectral-self"
+DEFAULT_TRANSFORMER_CONFIG_OVERRIDES = {
+    "analytic_num_heads": 2,
+    "attention_target": "mean",
+    "attention_power_iters": 1,
+    "attention_num_bags": 1,
+    "attention_bag_fraction": 1.0,
+}
 
-DEFAULT_DATASETS = ["covtype", "svhn", "cifar100", "ag_news"]
-DEFAULT_SCALING_DATASET = "svhn"
+DEFAULT_DATASETS = ["covtype", "cifar100", "qnli", "wikitext2_next_token"]
+DEFAULT_SCALING_DATASET = "wikitext2_next_token_scale"
+PLOT_SUBDIR = "broader_eval_suite"
 
-TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+")
+TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+|[.,!?;:]")
 TEXT_PAD = 0
 TEXT_UNK = 1
 
@@ -64,16 +69,23 @@ class DatasetSpec:
     n_train: int
     n_test: int
     seed: int
+    task_type: str = "classification"
     image_size: int = 32
     text_vocab_size: int = 512
     text_seq_len: int = 32
     text_embed_dim: int = 64
     text_drop_prob: float = 0.2
+    text_dataset_name: str | None = None
+    text_dataset_config: str | None = None
+    text_fields: tuple[str, ...] = ("text",)
+    label_field: str = "label"
+    eval_split: str | None = None
+    next_token_stride: int = 4
 
 
 @dataclass(frozen=True)
 class MLPEvalConfig:
-    width: int = 512
+    width: int = 507
     depth: int = 3
     activation: str = "relu"
     lambda_reg: float = 1.0
@@ -82,6 +94,9 @@ class MLPEvalConfig:
     batch_size: int = 256
     lr: float = 1e-3
     weight_decay: float = 1e-4
+    dual_mapping: bool = True
+    output_source: str = "post-hidden"
+    center_after_hidden: bool = False
 
 
 @dataclass(frozen=True)
@@ -146,6 +161,7 @@ class RawDatasetBundle:
     name: str
     suite: str
     modality: str
+    task_type: str
     train_raw: np.ndarray
     test_raw: np.ndarray
     ytr: np.ndarray
@@ -165,10 +181,67 @@ class RawDatasetBundle:
 
 
 DATASET_REGISTRY = {
-    "covtype": {"suite": "feature-mask", "n_train": 12000, "n_test": 4000},
-    "svhn": {"suite": "random-affine", "n_train": 6000, "n_test": 2000},
-    "cifar100": {"suite": "random-affine", "n_train": 8000, "n_test": 2000},
-    "ag_news": {"suite": "token-mask", "n_train": 8000, "n_test": 2000},
+    "covtype": {
+        "suite": "feature-mask",
+        "n_train": 12000,
+        "n_test": 4000,
+        "task_type": "classification",
+    },
+    "svhn": {
+        "suite": "random-affine",
+        "n_train": 6000,
+        "n_test": 2000,
+        "task_type": "classification",
+    },
+    "cifar100": {
+        "suite": "random-affine",
+        "n_train": 8000,
+        "n_test": 2000,
+        "task_type": "classification",
+    },
+    "qnli": {
+        "suite": "token-mask",
+        "n_train": 10000,
+        "n_test": 3000,
+        "task_type": "classification",
+        "text_dataset_name": "glue",
+        "text_dataset_config": "qnli",
+        "text_fields": ("question", "sentence"),
+        "label_field": "label",
+        "eval_split": "validation",
+        "text_vocab_size": 8192,
+        "text_seq_len": 80,
+        "text_embed_dim": 64,
+        "text_drop_prob": 0.12,
+    },
+    "wikitext2_next_token": {
+        "suite": "token-mask",
+        "n_train": 16000,
+        "n_test": 3000,
+        "task_type": "next_token",
+        "text_dataset_name": "wikitext",
+        "text_dataset_config": "wikitext-2-raw-v1",
+        "text_fields": ("text",),
+        "text_vocab_size": 4096,
+        "text_seq_len": 64,
+        "text_embed_dim": 64,
+        "text_drop_prob": 0.1,
+        "next_token_stride": 3,
+    },
+    "wikitext2_next_token_scale": {
+        "suite": "token-mask",
+        "n_train": 8000,
+        "n_test": 2000,
+        "task_type": "next_token",
+        "text_dataset_name": "wikitext",
+        "text_dataset_config": "wikitext-2-raw-v1",
+        "text_fields": ("text",),
+        "text_vocab_size": 4096,
+        "text_seq_len": 32,
+        "text_embed_dim": 64,
+        "text_drop_prob": 0.1,
+        "next_token_stride": 3,
+    },
 }
 
 
@@ -179,15 +252,15 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def one_hot(y, num_classes):
-    eye = np.eye(num_classes, dtype=np.float64)
+def one_hot(y, num_classes, dtype=np.float64):
+    eye = np.eye(num_classes, dtype=dtype)
     return eye[y]
 
 
 def ridge_regression(X, Y, reg):
     gram = X.T @ X
     rhs = X.T @ Y
-    return np.linalg.solve(gram + reg * np.eye(gram.shape[0], dtype=np.float64), rhs)
+    return np.linalg.solve(gram + reg * np.eye(gram.shape[0], dtype=gram.dtype), rhs)
 
 
 def evaluate_logits(logits, y):
@@ -273,33 +346,89 @@ def load_covtype_full():
     return X, y
 
 
-@lru_cache(maxsize=8)
-def load_ag_news_tokenized(vocab_size, seq_len):
-    dataset = load_dataset("ag_news")
-    train_texts = dataset["train"]["text"]
-    test_texts = dataset["test"]["text"]
-    train_labels = np.asarray(dataset["train"]["label"], dtype=np.int64)
-    test_labels = np.asarray(dataset["test"]["label"], dtype=np.int64)
+def tokenize_text(text):
+    return [token.lower() for token in TOKEN_PATTERN.findall(text)]
 
+
+def join_text_fields(record, text_fields):
+    parts = []
+    for field in text_fields:
+        value = record[field]
+        if value:
+            parts.append(str(value))
+    return " ".join(parts)
+
+
+def build_vocab_from_texts(texts, vocab_size):
     counter = Counter()
-    for text in train_texts:
-        counter.update(token.lower() for token in TOKEN_PATTERN.findall(text))
-
+    for text in texts:
+        counter.update(tokenize_text(text))
     most_common = [token for token, _ in counter.most_common(max(0, vocab_size - 2))]
-    vocab = {token: idx + 2 for idx, token in enumerate(most_common)}
+    return {token: idx + 2 for idx, token in enumerate(most_common)}
 
-    def encode(texts):
-        encoded = np.zeros((len(texts), seq_len), dtype=np.int64)
-        for row_idx, text in enumerate(texts):
-            tokens = [vocab.get(token.lower(), TEXT_UNK) for token in TOKEN_PATTERN.findall(text)]
-            tokens = tokens[:seq_len]
-            if tokens:
-                encoded[row_idx, : len(tokens)] = tokens
-        return encoded
 
+def encode_texts_to_ids(texts, vocab, seq_len):
+    encoded = np.zeros((len(texts), seq_len), dtype=np.int64)
+    for row_idx, text in enumerate(texts):
+        tokens = [vocab.get(token, TEXT_UNK) for token in tokenize_text(text)]
+        tokens = tokens[:seq_len]
+        if tokens:
+            encoded[row_idx, : len(tokens)] = tokens
+    return encoded
+
+
+@lru_cache(maxsize=8)
+def load_text_classification_tokenized(dataset_name, dataset_config, text_fields, label_field, eval_split, vocab_size, seq_len):
+    dataset = load_dataset(dataset_name, dataset_config) if dataset_config is not None else load_dataset(dataset_name)
+    train_texts = [join_text_fields(record, text_fields) for record in dataset["train"]]
+    resolved_eval_split = eval_split
+    if resolved_eval_split is None:
+        resolved_eval_split = "test" if "test" in dataset and label_field in dataset["test"].column_names else "validation"
+    test_texts = [join_text_fields(record, text_fields) for record in dataset[resolved_eval_split]]
+    train_labels = np.asarray(dataset["train"][label_field], dtype=np.int64)
+    test_labels = np.asarray(dataset[resolved_eval_split][label_field], dtype=np.int64)
+    vocab = build_vocab_from_texts(train_texts, vocab_size)
     return {
-        "train_ids": encode(train_texts),
-        "test_ids": encode(test_texts),
+        "train_ids": encode_texts_to_ids(train_texts, vocab, seq_len),
+        "test_ids": encode_texts_to_ids(test_texts, vocab, seq_len),
+        "train_labels": train_labels,
+        "test_labels": test_labels,
+    }
+
+
+@lru_cache(maxsize=4)
+def load_next_token_text_tokenized(dataset_name, dataset_config, text_fields, vocab_size, seq_len, stride):
+    dataset = load_dataset(dataset_name, dataset_config) if dataset_config is not None else load_dataset(dataset_name)
+    train_texts = [join_text_fields(record, text_fields) for record in dataset["train"]]
+    val_split = "validation" if "validation" in dataset else "test"
+    eval_texts = [join_text_fields(record, text_fields) for record in dataset[val_split]]
+    vocab = build_vocab_from_texts(train_texts, vocab_size)
+
+    def encode_stream(texts):
+        stream = []
+        for text in texts:
+            stream.extend(vocab.get(token, TEXT_UNK) for token in tokenize_text(text))
+        return np.asarray(stream, dtype=np.int64)
+
+    def make_examples(stream):
+        contexts = []
+        labels = []
+        max_start = max(0, len(stream) - seq_len - 1)
+        for start in range(0, max_start, stride):
+            window = stream[start : start + seq_len + 1]
+            if len(window) < seq_len + 1:
+                break
+            contexts.append(window[:seq_len])
+            labels.append(window[seq_len])
+        return np.asarray(contexts, dtype=np.int64), np.asarray(labels, dtype=np.int64)
+
+    train_stream = encode_stream(train_texts)
+    eval_stream = encode_stream(eval_texts)
+    train_ids, train_labels = make_examples(train_stream)
+    test_ids, test_labels = make_examples(eval_stream)
+    return {
+        "train_ids": train_ids,
+        "test_ids": test_ids,
         "train_labels": train_labels,
         "test_labels": test_labels,
     }
@@ -338,6 +467,7 @@ def load_dataset_bundle(spec: DatasetSpec):
             name=spec.name,
             suite=spec.suite,
             modality="tabular",
+            task_type=spec.task_type,
             train_raw=xtr,
             test_raw=xte,
             ytr=ytr,
@@ -363,6 +493,7 @@ def load_dataset_bundle(spec: DatasetSpec):
             name=spec.name,
             suite=spec.suite,
             modality="image",
+            task_type=spec.task_type,
             train_raw=xtr,
             test_raw=xte,
             ytr=ytr,
@@ -384,6 +515,7 @@ def load_dataset_bundle(spec: DatasetSpec):
             name=spec.name,
             suite=spec.suite,
             modality="image",
+            task_type=spec.task_type,
             train_raw=xtr,
             test_raw=xte,
             ytr=ytr,
@@ -405,6 +537,7 @@ def load_dataset_bundle(spec: DatasetSpec):
             name=spec.name,
             suite=spec.suite,
             modality="image",
+            task_type=spec.task_type,
             train_raw=dataset["xtr_img"].astype(np.float32),
             test_raw=dataset["xte_img"].astype(np.float32),
             ytr=dataset["ytr"].astype(np.int64),
@@ -414,8 +547,16 @@ def load_dataset_bundle(spec: DatasetSpec):
             image_mean=dataset["xtr_img"].mean(axis=0, keepdims=True).astype(np.float32),
         )
 
-    if spec.name == "ag_news":
-        tokenized = load_ag_news_tokenized(spec.text_vocab_size, spec.text_seq_len)
+    if spec.text_dataset_name is not None and spec.task_type == "classification":
+        tokenized = load_text_classification_tokenized(
+            spec.text_dataset_name,
+            spec.text_dataset_config,
+            spec.text_fields,
+            spec.label_field,
+            spec.eval_split,
+            spec.text_vocab_size,
+            spec.text_seq_len,
+        )
         idx_tr = sample_indices(len(tokenized["train_ids"]), spec.n_train, spec.seed)
         idx_te = sample_indices(len(tokenized["test_ids"]), spec.n_test, spec.seed + 1)
         embedding = build_text_embedding(spec.text_vocab_size, spec.text_embed_dim, seed=0)
@@ -424,11 +565,40 @@ def load_dataset_bundle(spec: DatasetSpec):
             name=spec.name,
             suite=spec.suite,
             modality="text",
+            task_type=spec.task_type,
             train_raw=tokenized["train_ids"][idx_tr],
             test_raw=tokenized["test_ids"][idx_te],
             ytr=tokenized["train_labels"][idx_tr],
             yte=tokenized["test_labels"][idx_te],
             num_classes=int(max(tokenized["train_labels"].max(), tokenized["test_labels"].max()) + 1),
+            text_embedding=embedding,
+            text_pos=pos,
+            text_drop_prob=spec.text_drop_prob,
+        )
+
+    if spec.text_dataset_name is not None and spec.task_type == "next_token":
+        tokenized = load_next_token_text_tokenized(
+            spec.text_dataset_name,
+            spec.text_dataset_config,
+            spec.text_fields,
+            spec.text_vocab_size,
+            spec.text_seq_len,
+            spec.next_token_stride,
+        )
+        idx_tr = sample_indices(len(tokenized["train_ids"]), spec.n_train, spec.seed)
+        idx_te = sample_indices(len(tokenized["test_ids"]), spec.n_test, spec.seed + 1)
+        embedding = build_text_embedding(spec.text_vocab_size, spec.text_embed_dim, seed=0)
+        pos = make_1d_sincos_pos_embed(spec.text_embed_dim, spec.text_seq_len)
+        return RawDatasetBundle(
+            name=spec.name,
+            suite=spec.suite,
+            modality="text",
+            task_type=spec.task_type,
+            train_raw=tokenized["train_ids"][idx_tr],
+            test_raw=tokenized["test_ids"][idx_te],
+            ytr=tokenized["train_labels"][idx_tr],
+            yte=tokenized["test_labels"][idx_te],
+            num_classes=spec.text_vocab_size,
             text_embedding=embedding,
             text_pos=pos,
             text_drop_prob=spec.text_drop_prob,
@@ -511,23 +681,27 @@ def build_mlp_arrays(bundle: RawDatasetBundle, seed: int):
         return base_tr, base_te, view1_tr, view2_tr, view1_te, view2_te
 
     if bundle.modality == "text":
-        base_tr = bow_from_ids(bundle.train_raw, bundle.text_embedding.shape[0])
-        base_te = bow_from_ids(bundle.test_raw, bundle.text_embedding.shape[0])
-        view1_tr = bow_from_ids(
+        base_tr = flatten_text_tokens(bundle.train_raw, bundle.text_embedding, bundle.text_pos)
+        base_te = flatten_text_tokens(bundle.test_raw, bundle.text_embedding, bundle.text_pos)
+        view1_tr = flatten_text_tokens(
             augment_text_ids_numpy(bundle.train_raw, seed + 101, bundle.text_drop_prob),
-            bundle.text_embedding.shape[0],
+            bundle.text_embedding,
+            bundle.text_pos,
         )
-        view2_tr = bow_from_ids(
+        view2_tr = flatten_text_tokens(
             augment_text_ids_numpy(bundle.train_raw, seed + 102, bundle.text_drop_prob),
-            bundle.text_embedding.shape[0],
+            bundle.text_embedding,
+            bundle.text_pos,
         )
-        view1_te = bow_from_ids(
+        view1_te = flatten_text_tokens(
             augment_text_ids_numpy(bundle.test_raw, seed + 202, bundle.text_drop_prob),
-            bundle.text_embedding.shape[0],
+            bundle.text_embedding,
+            bundle.text_pos,
         )
-        view2_te = bow_from_ids(
+        view2_te = flatten_text_tokens(
             augment_text_ids_numpy(bundle.test_raw, seed + 203, bundle.text_drop_prob),
-            bundle.text_embedding.shape[0],
+            bundle.text_embedding,
+            bundle.text_pos,
         )
         mean = base_tr.mean(axis=0, keepdims=True)
         return (
@@ -552,21 +726,26 @@ def build_mlp_arrays(bundle: RawDatasetBundle, seed: int):
 
 
 def build_image_tokens(images, mean_image, patch_size):
-    tokens = tcc.patchify_numpy(images.astype(np.float32) - mean_image.astype(np.float32), patch_size).astype(np.float64)
+    tokens = tcc.patchify_numpy(images.astype(np.float32) - mean_image.astype(np.float32), patch_size).astype(np.float32)
     grid = int(round(math.sqrt(tokens.shape[1])))
-    pos = tcc.make_2d_sincos_pos_embed(tokens.shape[-1], grid).astype(np.float64)
+    pos = tcc.make_2d_sincos_pos_embed(tokens.shape[-1], grid).astype(np.float32)
     return tokens + pos[None, :, :]
 
 
 def build_text_tokens(ids, embedding, pos):
-    return embedding[ids].astype(np.float64) + pos[None, :, :].astype(np.float64)
+    return embedding[ids].astype(np.float32) + pos[None, :, :].astype(np.float32)
+
+
+def flatten_text_tokens(ids, embedding, pos):
+    tokens = build_text_tokens(ids, embedding, pos)
+    return tokens.reshape(tokens.shape[0], -1)
 
 
 def build_tabular_tokens(features, embedding, pos):
-    return features[:, :, None].astype(np.float64) * embedding[None, :, :].astype(np.float64) + pos[None, :, :].astype(np.float64)
+    return features[:, :, None].astype(np.float32) * embedding[None, :, :].astype(np.float32) + pos[None, :, :].astype(np.float32)
 
 
-def build_transformer_arrays(bundle: RawDatasetBundle, seed: int, patch_size: int):
+def build_transformer_arrays(bundle: RawDatasetBundle, seed: int, patch_size: int, include_test_views: bool = True):
     if bundle.modality == "image":
         base_tr = build_image_tokens(bundle.train_raw, bundle.image_mean, patch_size)
         base_te = build_image_tokens(bundle.test_raw, bundle.image_mean, patch_size)
@@ -580,16 +759,20 @@ def build_transformer_arrays(bundle: RawDatasetBundle, seed: int, patch_size: in
             bundle.image_mean,
             patch_size,
         )
-        view1_te = build_image_tokens(
-            cifar_shared.apply_augmentation(bundle.test_raw, bundle.suite, np.random.default_rng(seed + 202)).astype(np.float32),
-            bundle.image_mean,
-            patch_size,
-        )
-        view2_te = build_image_tokens(
-            cifar_shared.apply_augmentation(bundle.test_raw, bundle.suite, np.random.default_rng(seed + 203)).astype(np.float32),
-            bundle.image_mean,
-            patch_size,
-        )
+        if include_test_views:
+            view1_te = build_image_tokens(
+                cifar_shared.apply_augmentation(bundle.test_raw, bundle.suite, np.random.default_rng(seed + 202)).astype(np.float32),
+                bundle.image_mean,
+                patch_size,
+            )
+            view2_te = build_image_tokens(
+                cifar_shared.apply_augmentation(bundle.test_raw, bundle.suite, np.random.default_rng(seed + 203)).astype(np.float32),
+                bundle.image_mean,
+                patch_size,
+            )
+        else:
+            view1_te = None
+            view2_te = None
         return base_tr, base_te, view1_tr, view2_tr, view1_te, view2_te
 
     if bundle.modality == "text":
@@ -605,16 +788,20 @@ def build_transformer_arrays(bundle: RawDatasetBundle, seed: int, patch_size: in
             bundle.text_embedding,
             bundle.text_pos,
         )
-        view1_te = build_text_tokens(
-            augment_text_ids_numpy(bundle.test_raw, seed + 202, bundle.text_drop_prob),
-            bundle.text_embedding,
-            bundle.text_pos,
-        )
-        view2_te = build_text_tokens(
-            augment_text_ids_numpy(bundle.test_raw, seed + 203, bundle.text_drop_prob),
-            bundle.text_embedding,
-            bundle.text_pos,
-        )
+        if include_test_views:
+            view1_te = build_text_tokens(
+                augment_text_ids_numpy(bundle.test_raw, seed + 202, bundle.text_drop_prob),
+                bundle.text_embedding,
+                bundle.text_pos,
+            )
+            view2_te = build_text_tokens(
+                augment_text_ids_numpy(bundle.test_raw, seed + 203, bundle.text_drop_prob),
+                bundle.text_embedding,
+                bundle.text_pos,
+            )
+        else:
+            view1_te = None
+            view2_te = None
         return base_tr, base_te, view1_tr, view2_tr, view1_te, view2_te
 
     if bundle.modality == "tabular":
@@ -630,16 +817,20 @@ def build_transformer_arrays(bundle: RawDatasetBundle, seed: int, patch_size: in
             bundle.tabular_token_embedding,
             bundle.tabular_pos,
         )
-        view1_te = build_tabular_tokens(
-            augment_tabular_numpy(bundle.test_raw, seed + 202, bundle.tabular_drop_prob, bundle.tabular_noise_std),
-            bundle.tabular_token_embedding,
-            bundle.tabular_pos,
-        )
-        view2_te = build_tabular_tokens(
-            augment_tabular_numpy(bundle.test_raw, seed + 203, bundle.tabular_drop_prob, bundle.tabular_noise_std),
-            bundle.tabular_token_embedding,
-            bundle.tabular_pos,
-        )
+        if include_test_views:
+            view1_te = build_tabular_tokens(
+                augment_tabular_numpy(bundle.test_raw, seed + 202, bundle.tabular_drop_prob, bundle.tabular_noise_std),
+                bundle.tabular_token_embedding,
+                bundle.tabular_pos,
+            )
+            view2_te = build_tabular_tokens(
+                augment_tabular_numpy(bundle.test_raw, seed + 203, bundle.tabular_drop_prob, bundle.tabular_noise_std),
+                bundle.tabular_token_embedding,
+                bundle.tabular_pos,
+            )
+        else:
+            view1_te = None
+            view2_te = None
         return base_tr, base_te, view1_tr, view2_tr, view1_te, view2_te
 
     raise ValueError(f"Unsupported modality: {bundle.modality}")
@@ -683,11 +874,16 @@ def normalize_hidden_with_stats(train_arrays, eval_arrays):
     return scaled_train, scaled_eval, mean, scale
 
 
+def center_train_test_with_mean(train_array, test_array):
+    mean = train_array.mean(axis=0, keepdims=True)
+    return train_array - mean, test_array - mean, mean
+
+
 def build_base_mlp_features(bundle: RawDatasetBundle, raw_inputs):
     if bundle.modality == "image":
         return flatten_images(raw_inputs, bundle.image_mean)
     if bundle.modality == "text":
-        return bow_from_ids(raw_inputs, bundle.text_embedding.shape[0])
+        return flatten_text_tokens(raw_inputs, bundle.text_embedding, bundle.text_pos)
     if bundle.modality == "tabular":
         return raw_inputs.astype(np.float64)
     raise ValueError(f"Unsupported modality: {bundle.modality}")
@@ -725,6 +921,16 @@ def make_ood_variants(bundle: RawDatasetBundle, seed: int):
     raise ValueError(f"Unsupported modality: {bundle.modality}")
 
 
+def make_augmented_raw_view(bundle: RawDatasetBundle, raw_inputs, seed: int):
+    if bundle.modality == "image":
+        return cifar_shared.apply_augmentation(raw_inputs, bundle.suite, np.random.default_rng(seed)).astype(np.float32)
+    if bundle.modality == "text":
+        return augment_text_ids_numpy(raw_inputs, seed, bundle.text_drop_prob)
+    if bundle.modality == "tabular":
+        return augment_tabular_numpy(raw_inputs, seed, bundle.tabular_drop_prob, bundle.tabular_noise_std).astype(np.float32)
+    raise ValueError(f"Unsupported modality: {bundle.modality}")
+
+
 def effective_rank(features):
     centered = features - features.mean(axis=0, keepdims=True)
     cov = (centered.T @ centered) / max(centered.shape[0], 1)
@@ -752,6 +958,148 @@ def centroid_margin(train_repr, ytr, test_repr, yte):
         others = np.delete(sims[idx], label)
         margins.append(own - np.max(others))
     return float(np.mean(margins))
+
+
+def cosine_alignment(a, b):
+    a_norm = a / np.maximum(np.linalg.norm(a, axis=1, keepdims=True), 1e-8)
+    b_norm = b / np.maximum(np.linalg.norm(b, axis=1, keepdims=True), 1e-8)
+    return np.sum(a_norm * b_norm, axis=1)
+
+
+def view_alignment_summary(repr1, repr2):
+    if len(repr1) == 0:
+        return {
+            "view_alignment_cosine": 0.0,
+            "view_alignment_gap": 0.0,
+        }
+    same = cosine_alignment(repr1, repr2)
+    perm = np.roll(np.arange(len(repr2)), 1)
+    shuffled = cosine_alignment(repr1, repr2[perm])
+    return {
+        "view_alignment_cosine": float(np.mean(same)),
+        "view_alignment_gap": float(np.mean(same - shuffled)),
+    }
+
+
+def augmentation_prediction_summary(base_logits, logits1, logits2):
+    if len(base_logits) == 0:
+        return {
+            "augmentation_prediction_agreement": 0.0,
+            "base_view_prediction_agreement": 0.0,
+        }
+    base_pred = np.argmax(base_logits, axis=1)
+    pred1 = np.argmax(logits1, axis=1)
+    pred2 = np.argmax(logits2, axis=1)
+    return {
+        "augmentation_prediction_agreement": float(np.mean(pred1 == pred2)),
+        "base_view_prediction_agreement": float(0.5 * (np.mean(base_pred == pred1) + np.mean(base_pred == pred2))),
+    }
+
+
+def analysis_sample_count(total, task_type):
+    base = 256 if task_type == "classification" else 384
+    return min(base, total)
+
+
+def sample_analysis_indices(total, task_type, seed):
+    count = analysis_sample_count(total, task_type)
+    if count <= 0:
+        return np.zeros((0,), dtype=np.int64)
+    if total <= count:
+        return np.arange(total, dtype=np.int64)
+    rng = np.random.default_rng(seed)
+    return np.sort(rng.choice(total, size=count, replace=False).astype(np.int64))
+
+
+def linear_cka(features_x, features_y):
+    if len(features_x) == 0 or len(features_y) == 0:
+        return 0.0
+    x = np.asarray(features_x, dtype=np.float64)
+    y = np.asarray(features_y, dtype=np.float64)
+    x = x - x.mean(axis=0, keepdims=True)
+    y = y - y.mean(axis=0, keepdims=True)
+    gram_x = x @ x.T
+    gram_y = y @ y.T
+    numerator = float(np.sum(gram_x * gram_y))
+    denom_x = float(np.sqrt(np.sum(gram_x * gram_x)))
+    denom_y = float(np.sqrt(np.sum(gram_y * gram_y)))
+    return float(numerator / max(denom_x * denom_y, 1e-12))
+
+
+def labels_to_one_hot(y, num_classes):
+    return np.eye(num_classes, dtype=np.float64)[np.asarray(y, dtype=np.int64)]
+
+
+def summarize_layer_geometry(layer_reprs, labels, num_classes):
+    if not layer_reprs:
+        return []
+    input_repr = np.asarray(layer_reprs[0], dtype=np.float64)
+    label_repr = labels_to_one_hot(labels, num_classes)
+    summary = []
+    for idx, layer_repr in enumerate(layer_reprs):
+        repr_arr = np.asarray(layer_repr, dtype=np.float64)
+        summary.append(
+            {
+                "layer": idx,
+                "cka_to_input": linear_cka(input_repr, repr_arr),
+                "cka_to_labels": linear_cka(repr_arr, label_repr),
+                "effective_rank": effective_rank(repr_arr),
+            }
+        )
+    return summary
+
+
+def format_umap_labels(labels, task_type):
+    labels = np.asarray(labels, dtype=np.int64)
+    if labels.size == 0:
+        return []
+    if task_type != "next_token" and len(np.unique(labels)) <= 20:
+        return [str(int(label)) for label in labels]
+    counter = Counter(labels.tolist())
+    top = {label for label, _ in counter.most_common(8)}
+    return [str(int(label)) if int(label) in top else "other" for label in labels]
+
+
+def compute_umap_points(features, labels, task_type, seed):
+    if len(features) < 3:
+        return []
+    try:
+        import umap  # type: ignore
+    except Exception:
+        return []
+    n_neighbors = max(2, min(30, len(features) // 8))
+    n_neighbors = min(n_neighbors, max(2, len(features) - 1))
+    reducer = umap.UMAP(
+        n_components=2,
+        n_neighbors=n_neighbors,
+        min_dist=0.15,
+        metric="cosine",
+        random_state=seed,
+    )
+    coords = reducer.fit_transform(np.asarray(features, dtype=np.float32))
+    grouped_labels = format_umap_labels(labels, task_type)
+    return [
+        {
+            "point_index": int(idx),
+            "x": float(coords[idx, 0]),
+            "y": float(coords[idx, 1]),
+            "label": int(labels[idx]),
+            "group_label": grouped_labels[idx],
+        }
+        for idx in range(len(coords))
+    ]
+
+
+def pool_sequence_numpy(tokens, task_type):
+    if task_type == "next_token":
+        return tokens[:, -1, :]
+    return tokens.mean(axis=1)
+
+
+def pool_sequence_torch(tokens, task_type):
+    if task_type == "next_token":
+        return tokens[:, -1, :]
+    return tokens.mean(dim=1)
 
 
 def masked_batch_for_sample(bundle: RawDatasetBundle, sample, patch_size):
@@ -836,6 +1184,47 @@ def occlusion_summary(bundle: RawDatasetBundle, raw_test, predict_logits_fn, pat
     }
 
 
+def build_analysis_payload(bundle, seed, predict_logits_fn, encode_final_fn, encode_layers_fn, patch_size):
+    ood_results = []
+    for shift_name, shifted_inputs in make_ood_variants(bundle, seed).items():
+        logits = predict_logits_fn(shifted_inputs)
+        ood_results.append({"shift": shift_name, "accuracy": evaluate_logits(logits, bundle.yte)})
+
+    train_repr = encode_final_fn(bundle.train_raw)
+    test_repr = encode_final_fn(bundle.test_raw)
+
+    subset_idx = sample_analysis_indices(len(bundle.test_raw), bundle.task_type, seed + 4101)
+    analysis_raw = bundle.test_raw[subset_idx]
+    analysis_labels = bundle.yte[subset_idx]
+    layer_reprs = encode_layers_fn(analysis_raw)
+    layer_geometry = summarize_layer_geometry(layer_reprs, analysis_labels, bundle.num_classes)
+    umap_points = compute_umap_points(layer_reprs[-1], analysis_labels, bundle.task_type, seed + 5101) if layer_reprs else []
+
+    aug_view1 = make_augmented_raw_view(bundle, analysis_raw, seed + 4001)
+    aug_view2 = make_augmented_raw_view(bundle, analysis_raw, seed + 4002)
+    base_logits = predict_logits_fn(analysis_raw)
+    view1_logits = predict_logits_fn(aug_view1)
+    view2_logits = predict_logits_fn(aug_view2)
+
+    interpretability = {
+        "effective_rank": effective_rank(test_repr),
+        "centroid_margin": centroid_margin(train_repr, bundle.ytr, test_repr, bundle.yte),
+        **occlusion_summary(bundle, bundle.test_raw, predict_logits_fn, patch_size=patch_size),
+        **view_alignment_summary(encode_final_fn(aug_view1), encode_final_fn(aug_view2)),
+        **augmentation_prediction_summary(base_logits, view1_logits, view2_logits),
+    }
+    if layer_geometry:
+        interpretability["final_cka_to_input"] = layer_geometry[-1]["cka_to_input"]
+        interpretability["final_cka_to_labels"] = layer_geometry[-1]["cka_to_labels"]
+
+    return {
+        "ood_results": ood_results,
+        "interpretability": interpretability,
+        "layerwise_geometry": layer_geometry,
+        "umap_points": umap_points,
+    }
+
+
 def run_closed_form_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPEvalConfig, seed: int, collect_analysis: bool = False):
     set_seed(seed)
     base_tr, base_te, view1_tr, view2_tr, view1_te, view2_te = build_mlp_arrays(bundle, seed)
@@ -847,6 +1236,8 @@ def run_closed_form_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPE
     base_te, view1_te, view2_te = test_arrays
 
     ytr_onehot = one_hot(bundle.ytr, bundle.num_classes)
+    yhat_tr = np.zeros_like(ytr_onehot)
+    yhat_te = np.zeros((len(bundle.yte), bundle.num_classes), dtype=np.float64)
     layers = []
     activation_param_count = 0
     output_param_count = 0
@@ -855,6 +1246,16 @@ def run_closed_form_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPE
 
     start = time.perf_counter()
     for layer_idx in range(config.depth):
+        pre_output_map = None
+        post_output_map = None
+        base_center_mean = None
+
+        if config.dual_mapping and config.output_source == "pre-hidden":
+            pre_output_map = ridge_regression(base_tr, ytr_onehot - yhat_tr, reg=config.head_reg)
+            output_param_count += int(pre_output_map.size)
+            yhat_tr = yhat_tr + base_tr @ pre_output_map
+            yhat_te = yhat_te + base_te @ pre_output_map
+
         fitted = dpr.fit_activation_transforms(
             method_name=method_name,
             base_tr=base_tr,
@@ -876,6 +1277,17 @@ def run_closed_form_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPE
         view1_te = cfbt.apply_layer(view1_te, fitted["transform_view1"], activation=config.activation)
         view2_te = cfbt.apply_layer(view2_te, fitted["transform_view2"], activation=config.activation)
 
+        if config.center_after_hidden:
+            base_tr, base_te, base_center_mean = center_train_test_with_mean(base_tr, base_te)
+            view1_tr, view1_te, _ = center_train_test_with_mean(view1_tr, view1_te)
+            view2_tr, view2_te, _ = center_train_test_with_mean(view2_tr, view2_te)
+
+        if config.dual_mapping and config.output_source == "post-hidden":
+            post_output_map = ridge_regression(base_tr, ytr_onehot - yhat_tr, reg=config.head_reg)
+            output_param_count += int(post_output_map.size)
+            yhat_tr = yhat_tr + base_tr @ post_output_map
+            yhat_te = yhat_te + base_te @ post_output_map
+
         train_arrays, test_arrays, norm_mean, norm_scale = normalize_hidden_with_stats(
             [base_tr, view1_tr, view2_tr],
             [base_te, view1_te, view2_te],
@@ -883,12 +1295,19 @@ def run_closed_form_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPE
         base_tr, view1_tr, view2_tr = train_arrays
         base_te, view1_te, view2_te = test_arrays
 
-        output_map = ridge_regression(base_tr, ytr_onehot, reg=config.head_reg)
-        output_param_count = int(output_map.size)
-        logits_te = base_te @ output_map
+        if not config.dual_mapping:
+            output_map = ridge_regression(base_tr, ytr_onehot, reg=config.head_reg)
+            output_param_count = int(output_map.size)
+            logits_te = base_te @ output_map
+        else:
+            logits_te = yhat_te
+
         layer_states.append(
             {
                 "fitted": fitted,
+                "pre_output_map": pre_output_map,
+                "post_output_map": post_output_map,
+                "base_center_mean": base_center_mean,
                 "norm_mean": norm_mean,
                 "norm_scale": norm_scale,
             }
@@ -904,40 +1323,52 @@ def run_closed_form_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPE
 
     analysis = None
     if collect_analysis:
-        if bundle.modality == "text":
-            text_mean = bow_from_ids(bundle.train_raw, bundle.text_embedding.shape[0]).mean(axis=0, keepdims=True)
-        else:
-            text_mean = None
-
-        def encode_raw(raw_inputs):
+        def encode_layers(raw_inputs):
             hidden = build_base_mlp_features(bundle, raw_inputs)
-            if bundle.modality == "text":
-                hidden = hidden - text_mean
             hidden = (hidden - initial_mean) / initial_scale
+            collected = [hidden]
             for state in layer_states:
                 fitted = state["fitted"]
                 hidden = cfbt.apply_layer(hidden, fitted["transform_base"], activation=config.activation)
+                if state["base_center_mean"] is not None:
+                    hidden = hidden - state["base_center_mean"]
                 hidden = (hidden - state["norm_mean"]) / state["norm_scale"]
-            return hidden
+                collected.append(hidden)
+            return collected
+
+        def encode_raw(raw_inputs):
+            return encode_layers(raw_inputs)[-1]
 
         def predict_logits(raw_inputs):
-            return encode_raw(raw_inputs) @ output_map
+            hidden = build_base_mlp_features(bundle, raw_inputs)
+            hidden = (hidden - initial_mean) / initial_scale
+            if config.dual_mapping:
+                logits = np.zeros((len(hidden), bundle.num_classes), dtype=np.float64)
+                for state in layer_states:
+                    if state["pre_output_map"] is not None:
+                        logits = logits + hidden @ state["pre_output_map"]
+                    hidden = cfbt.apply_layer(hidden, state["fitted"]["transform_base"], activation=config.activation)
+                    if state["base_center_mean"] is not None:
+                        hidden = hidden - state["base_center_mean"]
+                    if state["post_output_map"] is not None:
+                        logits = logits + hidden @ state["post_output_map"]
+                    hidden = (hidden - state["norm_mean"]) / state["norm_scale"]
+                return logits
+            for state in layer_states:
+                hidden = cfbt.apply_layer(hidden, state["fitted"]["transform_base"], activation=config.activation)
+                if state["base_center_mean"] is not None:
+                    hidden = hidden - state["base_center_mean"]
+                hidden = (hidden - state["norm_mean"]) / state["norm_scale"]
+            return hidden @ output_map
 
-        ood_results = []
-        for shift_name, shifted_inputs in make_ood_variants(bundle, seed).items():
-            logits = predict_logits(shifted_inputs)
-            ood_results.append({"shift": shift_name, "accuracy": evaluate_logits(logits, bundle.yte)})
-
-        train_repr = encode_raw(bundle.train_raw)
-        test_repr = encode_raw(bundle.test_raw)
-        analysis = {
-            "ood_results": ood_results,
-            "interpretability": {
-                "effective_rank": effective_rank(test_repr),
-                "centroid_margin": centroid_margin(train_repr, bundle.ytr, test_repr, bundle.yte),
-                **occlusion_summary(bundle, bundle.test_raw, predict_logits, patch_size=8),
-            },
-        }
+        analysis = build_analysis_payload(
+            bundle,
+            seed,
+            predict_logits,
+            encode_raw,
+            encode_layers,
+            patch_size=8,
+        )
 
     return {
         "architecture": "mlp",
@@ -946,7 +1377,7 @@ def run_closed_form_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPE
         "suite": bundle.suite,
         "seed": seed,
         "closed_form_method": method_name,
-        "classifier_accuracy": layers[-1]["classifier_accuracy"],
+        "classifier_accuracy": evaluate_logits(yhat_te, bundle.yte) if config.dual_mapping else layers[-1]["classifier_accuracy"],
         "layers": layers,
         "hidden_param_count": activation_param_count,
         "output_param_count": output_param_count,
@@ -1010,16 +1441,8 @@ def run_backprop_mlp(bundle: RawDatasetBundle, config: MLPEvalConfig, seed: int,
 
     analysis = None
     if collect_analysis:
-        if bundle.modality == "text":
-            text_mean = bow_from_ids(bundle.train_raw, bundle.text_embedding.shape[0]).mean(axis=0, keepdims=True)
-        else:
-            text_mean = None
-
         def features_from_raw(raw_inputs):
-            feats = build_base_mlp_features(bundle, raw_inputs)
-            if bundle.modality == "text":
-                feats = feats - text_mean
-            return feats
+            return build_base_mlp_features(bundle, raw_inputs)
 
         def predict_logits(raw_inputs):
             with torch.no_grad():
@@ -1031,21 +1454,24 @@ def run_backprop_mlp(bundle: RawDatasetBundle, config: MLPEvalConfig, seed: int,
                 feats = torch.from_numpy(features_from_raw(raw_inputs)).float().to(device)
                 return model.encode(feats).cpu().numpy().astype(np.float64)
 
-        ood_results = []
-        for shift_name, shifted_inputs in make_ood_variants(bundle, seed).items():
-            logits = predict_logits(shifted_inputs)
-            ood_results.append({"shift": shift_name, "accuracy": evaluate_logits(logits, bundle.yte)})
+        def encode_layers(raw_inputs):
+            with torch.no_grad():
+                feats = torch.from_numpy(features_from_raw(raw_inputs)).float().to(device)
+                hidden = feats
+                collected = [hidden.cpu().numpy().astype(np.float64)]
+                for layer in model.hidden:
+                    hidden = torch.relu(layer(hidden))
+                    collected.append(hidden.cpu().numpy().astype(np.float64))
+                return collected
 
-        train_repr = encode_repr(bundle.train_raw)
-        test_repr = encode_repr(bundle.test_raw)
-        analysis = {
-            "ood_results": ood_results,
-            "interpretability": {
-                "effective_rank": effective_rank(test_repr),
-                "centroid_margin": centroid_margin(train_repr, bundle.ytr, test_repr, bundle.yte),
-                **occlusion_summary(bundle, bundle.test_raw, predict_logits, patch_size=8),
-            },
-        }
+        analysis = build_analysis_payload(
+            bundle,
+            seed,
+            predict_logits,
+            encode_repr,
+            encode_layers,
+            patch_size=8,
+        )
 
     return {
         "architecture": "mlp",
@@ -1090,11 +1516,13 @@ def make_attention_config(tokens, attention_kind, config: TransformerEvalConfig,
 
 def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, config: TransformerEvalConfig, seed: int, collect_analysis: bool = False):
     set_seed(seed)
-    base_tr, base_te, view1_tr, view2_tr, view1_te, view2_te = build_transformer_arrays(bundle, seed, config.patch_size)
+    base_tr, base_te, view1_tr, view2_tr, _, _ = build_transformer_arrays(
+        bundle, seed, config.patch_size, include_test_views=False
+    )
     attn_cfg = make_attention_config(base_tr, attention_kind, config, seed)
-    ytr_onehot = one_hot(bundle.ytr, bundle.num_classes)
+    ytr_onehot = one_hot(bundle.ytr, bundle.num_classes, dtype=base_tr.dtype)
     yhat_tr = np.zeros_like(ytr_onehot)
-    yhat_te = np.zeros((len(bundle.yte), bundle.num_classes), dtype=np.float64)
+    yhat_te = np.zeros((len(bundle.yte), bundle.num_classes), dtype=base_tr.dtype)
 
     layers = []
     output_param_count = 0
@@ -1103,8 +1531,8 @@ def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, c
 
     start = time.perf_counter()
     for layer_idx in range(config.depth):
-        pooled_tr = base_tr.mean(axis=1)
-        pooled_te = base_te.mean(axis=1)
+        pooled_tr = pool_sequence_numpy(base_tr, bundle.task_type)
+        pooled_te = pool_sequence_numpy(base_te, bundle.task_type)
         out_map = ridge_regression(pooled_tr, ytr_onehot - yhat_tr, reg=config.head_reg)
         output_param_count += int(out_map.size)
         yhat_tr = yhat_tr + pooled_tr @ out_map
@@ -1116,8 +1544,6 @@ def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, c
         base_te = tcc.apply_attention_block(base_te, attn_cfg, att_model)
         view1_tr = tcc.apply_attention_block(view1_tr, attn_cfg, att_model)
         view2_tr = tcc.apply_attention_block(view2_tr, attn_cfg, att_model)
-        view1_te = tcc.apply_attention_block(view1_te, attn_cfg, att_model)
-        view2_te = tcc.apply_attention_block(view2_te, attn_cfg, att_model)
 
         flat1 = view1_tr.reshape(-1, view1_tr.shape[-1])
         flat2 = view2_tr.reshape(-1, view2_tr.shape[-1])
@@ -1133,8 +1559,6 @@ def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, c
         base_te = apply_ffn(base_te)
         view1_tr = apply_ffn(view1_tr)
         view2_tr = apply_ffn(view2_tr)
-        view1_te = apply_ffn(view1_te)
-        view2_te = apply_ffn(view2_te)
         layer_states.append(
             {
                 "out_map": out_map,
@@ -1156,20 +1580,25 @@ def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, c
 
     analysis = None
     if collect_analysis:
-        def encode_raw(raw_inputs):
+        def encode_token_layers(raw_inputs):
             tokens = build_base_transformer_tokens(bundle, raw_inputs, config.patch_size)
+            collected = [pool_sequence_numpy(tokens, bundle.task_type)]
             for state in layer_states:
                 tokens = tcc.apply_attention_block(tokens, attn_cfg, state["att_model"])
                 flat = tokens.reshape(-1, tokens.shape[-1])
                 ffn = cfbt.apply_activation(flat @ state["ffn_model"]["transform_base"], "relu")
                 tokens = tcc.token_layer_norm(tokens + ffn.reshape(tokens.shape))
-            return tokens
+                collected.append(pool_sequence_numpy(tokens, bundle.task_type))
+            return collected
+
+        def encode_raw(raw_inputs):
+            return encode_token_layers(raw_inputs)[-1]
 
         def predict_logits(raw_inputs):
             tokens = build_base_transformer_tokens(bundle, raw_inputs, config.patch_size)
-            logits = np.zeros((tokens.shape[0], bundle.num_classes), dtype=np.float64)
+            logits = np.zeros((tokens.shape[0], bundle.num_classes), dtype=tokens.dtype)
             for state in layer_states:
-                pooled = tokens.mean(axis=1)
+                pooled = pool_sequence_numpy(tokens, bundle.task_type)
                 logits = logits + pooled @ state["out_map"]
                 tokens = tcc.apply_attention_block(tokens, attn_cfg, state["att_model"])
                 flat = tokens.reshape(-1, tokens.shape[-1])
@@ -1177,21 +1606,14 @@ def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, c
                 tokens = tcc.token_layer_norm(tokens + ffn.reshape(tokens.shape))
             return logits
 
-        ood_results = []
-        for shift_name, shifted_inputs in make_ood_variants(bundle, seed).items():
-            logits = predict_logits(shifted_inputs)
-            ood_results.append({"shift": shift_name, "accuracy": evaluate_logits(logits, bundle.yte)})
-
-        train_repr = encode_raw(bundle.train_raw).mean(axis=1)
-        test_repr = encode_raw(bundle.test_raw).mean(axis=1)
-        analysis = {
-            "ood_results": ood_results,
-            "interpretability": {
-                "effective_rank": effective_rank(test_repr),
-                "centroid_margin": centroid_margin(train_repr, bundle.ytr, test_repr, bundle.yte),
-                **occlusion_summary(bundle, bundle.test_raw, predict_logits, patch_size=max(1, config.patch_size)),
-            },
-        }
+        analysis = build_analysis_payload(
+            bundle,
+            seed,
+            predict_logits,
+            encode_raw,
+            encode_token_layers,
+            patch_size=max(1, config.patch_size),
+        )
 
     return {
         "architecture": "transformer",
@@ -1212,7 +1634,7 @@ def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, c
 
 
 class TokenTransformerClassifier(nn.Module):
-    def __init__(self, token_dim, num_heads, depth, num_classes, mlp_ratio):
+    def __init__(self, token_dim, num_heads, depth, num_classes, mlp_ratio, task_type="classification"):
         super().__init__()
         hidden_ffn = max(int(token_dim * mlp_ratio), token_dim)
         encoder_layer = nn.TransformerEncoderLayer(
@@ -1226,6 +1648,7 @@ class TokenTransformerClassifier(nn.Module):
         )
         self.blocks = nn.ModuleList([copy.deepcopy(encoder_layer) for _ in range(depth)])
         self.output_heads = nn.ModuleList([nn.Linear(token_dim, num_classes) for _ in range(depth)])
+        self.task_type = task_type
 
     def encode(self, tokens):
         hidden = tokens
@@ -1239,7 +1662,7 @@ class TokenTransformerClassifier(nn.Module):
         hidden = tokens
         for block, head in zip(self.blocks, self.output_heads):
             hidden = block(hidden)
-            pooled = hidden.mean(dim=1)
+            pooled = pool_sequence_torch(hidden, self.task_type)
             logits = head(pooled)
             cumulative = logits if cumulative is None else cumulative + logits
             depth_logits.append(cumulative)
@@ -1298,7 +1721,7 @@ def run_backprop_transformer(bundle: RawDatasetBundle, config: TransformerEvalCo
         raise ValueError(f"Unsupported modality: {bundle.modality}")
 
     train_loader = DataLoader(train_ds, batch_size=config.batch_size, shuffle=True, drop_last=False)
-    model = TokenTransformerClassifier(token_dim, num_heads, config.depth, bundle.num_classes, config.mlp_ratio).to(device)
+    model = TokenTransformerClassifier(token_dim, num_heads, config.depth, bundle.num_classes, config.mlp_ratio, task_type=bundle.task_type).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     criterion = nn.CrossEntropyLoss()
 
@@ -1356,23 +1779,26 @@ def run_backprop_transformer(bundle: RawDatasetBundle, config: TransformerEvalCo
 
         def encode_repr(raw_inputs):
             with torch.no_grad():
-                return model.encode(raw_to_tokens(raw_inputs)).mean(dim=1).cpu().numpy().astype(np.float64)
+                hidden = model.encode(raw_to_tokens(raw_inputs))
+                return pool_sequence_torch(hidden, bundle.task_type).cpu().numpy().astype(np.float64)
 
-        ood_results = []
-        for shift_name, shifted_inputs in make_ood_variants(bundle, seed).items():
-            logits = predict_logits(shifted_inputs)
-            ood_results.append({"shift": shift_name, "accuracy": evaluate_logits(logits, bundle.yte)})
+        def encode_layers(raw_inputs):
+            with torch.no_grad():
+                hidden = raw_to_tokens(raw_inputs)
+                collected = [pool_sequence_torch(hidden, bundle.task_type).cpu().numpy().astype(np.float64)]
+                for block in model.blocks:
+                    hidden = block(hidden)
+                    collected.append(pool_sequence_torch(hidden, bundle.task_type).cpu().numpy().astype(np.float64))
+                return collected
 
-        train_repr = encode_repr(bundle.train_raw)
-        test_repr = encode_repr(bundle.test_raw)
-        analysis = {
-            "ood_results": ood_results,
-            "interpretability": {
-                "effective_rank": effective_rank(test_repr),
-                "centroid_margin": centroid_margin(train_repr, bundle.ytr, test_repr, bundle.yte),
-                **occlusion_summary(bundle, bundle.test_raw, predict_logits, patch_size=max(1, config.patch_size)),
-            },
-        }
+        analysis = build_analysis_payload(
+            bundle,
+            seed,
+            predict_logits,
+            encode_repr,
+            encode_layers,
+            patch_size=max(1, config.patch_size),
+        )
 
     return {
         "architecture": "transformer",
@@ -1442,51 +1868,118 @@ def aggregate_by_method(rows):
 
 def infer_winners_from_existing_logs():
     base = default_json_path("placeholder.json").parent
-    mlp_scores = defaultdict(list)
-    transformer_scores = defaultdict(list)
+    mlp_records = []
+    transformer_records = []
 
-    for path in base.glob("*.json"):
+    for path in base.rglob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             continue
 
         rows = []
+        top_config = {}
         if isinstance(data, dict) and "results" in data and isinstance(data["results"], list):
             rows = data["results"]
+            top_config = data.get("config") or {}
         elif isinstance(data, dict) and "classifier_accuracy" in data:
             rows = [data]
+            top_config = data.get("config") or {}
 
         for row in rows:
             method = row.get("layer_method")
             acc = row.get("classifier_accuracy")
-            if method in MLP_CANDIDATES and acc is not None:
-                mlp_scores[method].append(float(acc))
+            if (
+                method in MLP_CANDIDATES
+                and acc is not None
+                and row.get("dataset") == "cifar100"
+                and row.get("suite") == "random-affine"
+            ):
+                mlp_records.append(
+                    {
+                        "method": method,
+                        "accuracy": float(acc),
+                        "config": {
+                            "dual_mapping": bool(row.get("dual_mapping", top_config.get("dual_mapping", DEFAULT_MLP_CONFIG_OVERRIDES["dual_mapping"]))),
+                            "output_source": (
+                                row.get("output_source")
+                                or top_config.get("output_source")
+                                or DEFAULT_MLP_CONFIG_OVERRIDES["output_source"]
+                            ),
+                            "center_after_hidden": bool(
+                                row.get("center_after_hidden", top_config.get("center_after_hidden", DEFAULT_MLP_CONFIG_OVERRIDES["center_after_hidden"]))
+                            ),
+                        },
+                    }
+                )
 
             model_name = row.get("model", "")
             if isinstance(model_name, str) and model_name.startswith("closed-form-transformer:") and acc is not None:
                 kind = model_name.split(":", 1)[1]
+                row_config = row.get("config") or top_config
                 if kind in TRANSFORMER_CANDIDATES:
-                    transformer_scores[kind].append(float(acc))
+                    if (
+                        row_config.get("dataset") == "cifar100"
+                        and row_config.get("suite") == "random-affine"
+                        and int(row_config.get("depth", 3)) == 3
+                        and int(row_config.get("patch_size", 8)) == 8
+                        and int(row_config.get("n_train", 10000)) >= 10000
+                        and int(row_config.get("n_test", 2000)) >= 2000
+                    ):
+                        transformer_records.append(
+                            {
+                                "method": kind,
+                                "accuracy": float(acc),
+                                "config": {
+                                    "analytic_num_heads": int(row_config.get("analytic_num_heads", DEFAULT_TRANSFORMER_CONFIG_OVERRIDES["analytic_num_heads"])),
+                                    "attention_target": row_config.get("attention_target", DEFAULT_TRANSFORMER_CONFIG_OVERRIDES["attention_target"]),
+                                    "attention_rank": int(row_config.get("attention_rank", 0)),
+                                    "num_landmarks": int(row_config.get("num_landmarks", 8)),
+                                    "local_sigma": float(row_config.get("local_sigma", 1.5)),
+                                    "attention_power_iters": int(row_config.get("attention_power_iters", DEFAULT_TRANSFORMER_CONFIG_OVERRIDES["attention_power_iters"])),
+                                    "attention_num_bags": int(row_config.get("attention_num_bags", DEFAULT_TRANSFORMER_CONFIG_OVERRIDES["attention_num_bags"])),
+                                    "attention_bag_fraction": float(
+                                        row_config.get("attention_bag_fraction", DEFAULT_TRANSFORMER_CONFIG_OVERRIDES["attention_bag_fraction"])
+                                    ),
+                                },
+                            }
+                        )
 
-    def choose(scores, fallback):
-        filtered = {name: vals for name, vals in scores.items() if len(vals) >= 2}
-        source = filtered if filtered else scores
-        if not source:
-            return fallback, []
-        summary = [
-            {
-                "method": name,
-                "mean_accuracy": float(np.mean(vals)),
-                "std_accuracy": float(np.std(vals, ddof=0)),
-                "best_accuracy": float(np.max(vals)),
-                "num_logs": len(vals),
-                # Favor strong average performance, lightly penalize volatility, and
-                # reward methods with broader empirical support from prior runs.
-                "selection_score": float(np.mean(vals) - 0.25 * np.std(vals, ddof=0) + 0.005 * np.log1p(len(vals))),
-            }
-            for name, vals in sorted(source.items())
-        ]
+    def choose(records, fallback_method, fallback_config):
+        grouped = defaultdict(list)
+        for record in records:
+            key = (record["method"], json.dumps(record["config"], sort_keys=True))
+            grouped[key].append(record)
+        if not grouped:
+            return fallback_method, fallback_config, []
+
+        summary = []
+        for (method, _), items in grouped.items():
+            vals = [item["accuracy"] for item in items]
+            summary.append(
+                {
+                    "closed_form_method": method,
+                    "config": items[0]["config"],
+                    "mean_accuracy": float(np.mean(vals)),
+                    "std_accuracy": float(np.std(vals, ddof=0)),
+                    "best_accuracy": float(np.max(vals)),
+                    "num_logs": len(vals),
+                    "selection_score": float(np.mean(vals) - 0.35 * np.std(vals, ddof=0) + 0.004 * np.log1p(len(vals))),
+                }
+            )
+        supported = [row for row in summary if row["num_logs"] >= 3]
+        if not supported:
+            supported = [row for row in summary if row["num_logs"] >= 2]
+        source = supported if supported else summary
+        source.sort(
+            key=lambda row: (
+                row["selection_score"],
+                row["mean_accuracy"],
+                row["best_accuracy"],
+                row["num_logs"],
+            ),
+            reverse=True,
+        )
         summary.sort(
             key=lambda row: (
                 row["selection_score"],
@@ -1496,14 +1989,42 @@ def infer_winners_from_existing_logs():
             ),
             reverse=True,
         )
-        winner = summary[0]["method"]
-        return winner, summary
+        winner = source[0]
+        return winner["closed_form_method"], winner["config"], summary
 
-    mlp_winner, mlp_summary = choose(mlp_scores, DEFAULT_MLP_WINNER)
-    transformer_winner, transformer_summary = choose(transformer_scores, DEFAULT_TRANSFORMER_WINNER)
+    mlp_winner, mlp_overrides, mlp_summary = choose(mlp_records, DEFAULT_MLP_WINNER, DEFAULT_MLP_CONFIG_OVERRIDES)
+    transformer_winner, transformer_overrides, transformer_summary = choose(
+        transformer_records,
+        DEFAULT_TRANSFORMER_WINNER,
+        DEFAULT_TRANSFORMER_CONFIG_OVERRIDES,
+    )
+    robust_transformer_rows = [row for row in transformer_summary if row["num_logs"] >= 3]
+    if robust_transformer_rows:
+        best_mean = max(row["mean_accuracy"] for row in robust_transformer_rows)
+        near_best = [row for row in robust_transformer_rows if best_mean - row["mean_accuracy"] <= 0.002]
+
+        def transformer_compute_hint(row):
+            config = row["config"]
+            kind = row["closed_form_method"]
+            score_multiplier = config.get("attention_power_iters", 1) if "score-" in kind else 1
+            bag_multiplier = config.get("attention_num_bags", 1) if "bagged" in kind else 1
+            return int(score_multiplier) * int(bag_multiplier)
+
+        near_best.sort(
+            key=lambda row: (
+                transformer_compute_hint(row),
+                -row["mean_accuracy"],
+                -row["best_accuracy"],
+                -row["num_logs"],
+            )
+        )
+        transformer_winner = near_best[0]["closed_form_method"]
+        transformer_overrides = near_best[0]["config"]
     return {
         "mlp_winner": mlp_winner,
+        "mlp_config_overrides": mlp_overrides,
         "transformer_winner": transformer_winner,
+        "transformer_config_overrides": transformer_overrides,
         "mlp_log_summary": mlp_summary,
         "transformer_log_summary": transformer_summary,
     }
@@ -1533,6 +2054,8 @@ def summarize_main_results(rows):
 def build_analytics_tables(rows):
     run_table = []
     ood_table = []
+    layer_table = []
+    latent_table = []
     for row in rows:
         run_id = f"{row['architecture']}::{row['model']}::{row['dataset']}::{row['seed']}"
         analysis = row.get("analysis") or {}
@@ -1553,6 +2076,12 @@ def build_analytics_tables(rows):
                 "top1_importance_fraction": interpretability.get("top1_importance_fraction"),
                 "top20_importance_fraction": interpretability.get("top20_importance_fraction"),
                 "top20_deletion_logit_drop": interpretability.get("top20_deletion_logit_drop"),
+                "view_alignment_cosine": interpretability.get("view_alignment_cosine"),
+                "view_alignment_gap": interpretability.get("view_alignment_gap"),
+                "augmentation_prediction_agreement": interpretability.get("augmentation_prediction_agreement"),
+                "base_view_prediction_agreement": interpretability.get("base_view_prediction_agreement"),
+                "final_cka_to_input": interpretability.get("final_cka_to_input"),
+                "final_cka_to_labels": interpretability.get("final_cka_to_labels"),
             }
         )
         for item in analysis.get("ood_results") or []:
@@ -1567,9 +2096,40 @@ def build_analytics_tables(rows):
                     "accuracy": item["accuracy"],
                 }
             )
+        for item in analysis.get("layerwise_geometry") or []:
+            layer_table.append(
+                {
+                    "run_id": run_id,
+                    "architecture": row["architecture"],
+                    "model": row["model"],
+                    "dataset": row["dataset"],
+                    "seed": row["seed"],
+                    "layer": item["layer"],
+                    "cka_to_input": item["cka_to_input"],
+                    "cka_to_labels": item["cka_to_labels"],
+                    "effective_rank": item["effective_rank"],
+                }
+            )
+        for item in analysis.get("umap_points") or []:
+            latent_table.append(
+                {
+                    "run_id": run_id,
+                    "architecture": row["architecture"],
+                    "model": row["model"],
+                    "dataset": row["dataset"],
+                    "seed": row["seed"],
+                    "point_index": item["point_index"],
+                    "x": item["x"],
+                    "y": item["y"],
+                    "label": item["label"],
+                    "group_label": item["group_label"],
+                }
+            )
     return {
         "run_table": run_table,
         "ood_table": ood_table,
+        "layer_table": layer_table,
+        "latent_table": latent_table,
     }
 
 
@@ -1598,6 +2158,80 @@ def fit_power_law(x_values, y_values):
     }
 
 
+def estimate_transformer_compute_proxy(
+    bundle: RawDatasetBundle,
+    config: TransformerEvalConfig,
+    model_kind: str,
+    closed_form_method: str | None = None,
+    implementation: str = "current",
+):
+    if bundle.modality == "image":
+        token_dim = int(bundle.train_raw.shape[1] * config.patch_size * config.patch_size)
+        num_tokens = int((bundle.image_size // config.patch_size) ** 2)
+    elif bundle.modality == "text":
+        token_dim = int(bundle.text_embedding.shape[1])
+        num_tokens = int(bundle.train_raw.shape[1])
+    elif bundle.modality == "tabular":
+        token_dim = int(bundle.tabular_token_embedding.shape[1])
+        num_tokens = int(bundle.train_raw.shape[1])
+    else:
+        raise ValueError(f"Unsupported modality for compute proxy: {bundle.modality}")
+
+    train_count = int(len(bundle.ytr))
+    num_heads = choose_num_heads(token_dim, preferred=config.num_heads)
+    analytic_heads = max(1, min(config.analytic_num_heads, num_heads))
+    rank = max(1, config.attention_rank if config.attention_rank > 0 else config.num_landmarks * analytic_heads)
+    hidden_ffn = max(int(token_dim * config.mlp_ratio), token_dim)
+    eval_count = int(len(bundle.yte))
+
+    if model_kind == "backprop":
+        per_layer_cost = (
+            4.0 * num_tokens * token_dim * token_dim
+            + 2.0 * num_tokens * num_tokens * token_dim
+            + 2.0 * num_tokens * token_dim * hidden_ffn
+        )
+        return float(config.epochs * train_count * config.depth * (per_layer_cost + token_dim * bundle.num_classes))
+
+    if implementation not in {"current", "legacy-search"}:
+        raise ValueError(f"Unknown transformer compute implementation: {implementation}")
+
+    bag_multiplier = config.attention_num_bags if closed_form_method and "bagged" in closed_form_method else 1
+    iter_multiplier = config.attention_power_iters if closed_form_method and "score-" in closed_form_method else 1
+    fit_views = 2.0 * train_count
+    apply_views = 3.0 * train_count + (1.0 if implementation == "current" else 3.0) * eval_count
+    score_projection_cost = num_tokens * token_dim * rank
+    score_matrix_cost = num_tokens * num_tokens * rank
+    value_mix_cost = num_tokens * num_tokens * token_dim
+    attention_build_cost = fit_views * (score_projection_cost + score_matrix_cost + value_mix_cost)
+    power_basis_cost = config.depth * bag_multiplier * iter_multiplier * fit_views * (
+        score_projection_cost + score_matrix_cost
+    )
+    search_candidates = 9.0 if implementation == "legacy-search" and closed_form_method == "score-self-power-gain" else 1.0
+    analytic_scale_cost = (
+        config.depth * fit_views * (score_projection_cost + score_matrix_cost)
+        if implementation == "current" and closed_form_method == "score-self-power-gain"
+        else 0.0
+    )
+    attention_fit_cost = config.depth * bag_multiplier * search_candidates * attention_build_cost
+    attention_apply_cost = config.depth * apply_views * (score_projection_cost + score_matrix_cost + value_mix_cost)
+    ffn_fit_cost = config.depth * fit_views * num_tokens * token_dim * token_dim
+    ffn_apply_cost = config.depth * apply_views * num_tokens * token_dim * token_dim
+    head_fit_cost = config.depth * (
+        train_count * token_dim * bundle.num_classes + token_dim * token_dim * bundle.num_classes
+    )
+    head_apply_cost = config.depth * (train_count + eval_count) * token_dim * bundle.num_classes
+    return float(
+        power_basis_cost
+        + analytic_scale_cost
+        + attention_fit_cost
+        + attention_apply_cost
+        + ffn_fit_cost
+        + ffn_apply_cost
+        + head_fit_cost
+        + head_apply_cost
+    )
+
+
 def summarize_scaling_rows(rows):
     grouped = defaultdict(list)
     for row in rows:
@@ -1609,6 +2243,7 @@ def summarize_scaling_rows(rows):
         errs = [1.0 - item["classifier_accuracy"] for item in items]
         params = [item["total_parameter_count"] for item in items]
         times = [item["fit_time_sec"] for item in items]
+        computes = [item["compute_proxy"] for item in items]
         aggregated.append(
             {
                 "architecture": architecture,
@@ -1620,6 +2255,8 @@ def summarize_scaling_rows(rows):
                 "mean_error": float(np.mean(errs)),
                 "mean_parameter_count": float(np.mean(params)),
                 "mean_fit_time_sec": float(np.mean(times)),
+                "mean_compute_proxy": float(np.mean(computes)),
+                "compute_unit": items[0].get("compute_unit", "compute_proxy"),
             }
         )
 
@@ -1634,7 +2271,7 @@ def summarize_scaling_rows(rows):
                 elif axis == "parameters":
                     x_vals = [row["mean_parameter_count"] for row in rows_axis]
                 elif axis == "compute":
-                    x_vals = [row["mean_fit_time_sec"] for row in rows_axis]
+                    x_vals = [row["mean_compute_proxy"] for row in rows_axis]
                 else:
                     continue
                 y_vals = [row["mean_error"] for row in rows_axis]
@@ -1692,14 +2329,18 @@ def plot_scaling_results(aggregated_rows, fit_rows, output_path):
     if plt is None:
         return False
     axes_order = ["data", "parameters", "compute"]
-    architectures = ["mlp", "transformer"]
-    fig, axs = plt.subplots(len(architectures), len(axes_order), figsize=(12, 7))
+    architectures = sorted({row["architecture"] for row in aggregated_rows})
+    fig, axs = plt.subplots(len(architectures), len(axes_order), figsize=(12, 3.8 * max(len(architectures), 1)))
+    axs = np.atleast_2d(axs)
 
     for row_idx, architecture in enumerate(architectures):
         for col_idx, axis_name in enumerate(axes_order):
             ax = axs[row_idx, col_idx]
             subset = [row for row in aggregated_rows if row["architecture"] == architecture and row["axis"] == axis_name]
             fit_subset = [row for row in fit_rows if row["architecture"] == architecture and row["axis"] == axis_name]
+            if not subset:
+                ax.set_visible(False)
+                continue
             for model in sorted({row["model"] for row in subset}):
                 rows_model = [row for row in subset if row["model"] == model]
                 if axis_name == "data":
@@ -1707,7 +2348,7 @@ def plot_scaling_results(aggregated_rows, fit_rows, output_path):
                 elif axis_name == "parameters":
                     x_vals = [row["mean_parameter_count"] for row in rows_model]
                 else:
-                    x_vals = [row["mean_fit_time_sec"] for row in rows_model]
+                    x_vals = [row["mean_compute_proxy"] for row in rows_model]
                 y_vals = [row["mean_error"] for row in rows_model]
                 ax.plot(x_vals, y_vals, marker="o", label=model)
             for fit_idx, fit in enumerate(fit_subset):
@@ -1722,11 +2363,169 @@ def plot_scaling_results(aggregated_rows, fit_rows, output_path):
             ax.set_xscale("log")
             ax.set_yscale("log")
             ax.set_title(f"{architecture} {axis_name}")
-            ax.set_xlabel(axis_name)
+            ax.set_xlabel("compute proxy" if axis_name == "compute" else axis_name)
             ax.set_ylabel("Error")
             ax.legend(frameon=False)
 
     fig.tight_layout()
+    fig.savefig(output_path, dpi=180)
+    plt.close(fig)
+    return True
+
+
+def plot_ood_results(run_rows, ood_rows, output_path):
+    plt = maybe_import_pyplot()
+    if plt is None or not ood_rows or not run_rows:
+        return False
+    datasets = sorted({row["dataset"] for row in ood_rows})
+    model_order = [("mlp", "closed-form"), ("mlp", "backprop"), ("transformer", "closed-form"), ("transformer", "backprop")]
+    base_grouped = defaultdict(list)
+    grouped = defaultdict(list)
+    for row in run_rows:
+        base_grouped[(row["dataset"], row["architecture"], row["model"])].append(row["classifier_accuracy"])
+    for row in ood_rows:
+        grouped[(row["dataset"], row["architecture"], row["model"], row["shift"])].append(row["accuracy"])
+
+    fig, axs = plt.subplots(1, len(datasets), figsize=(4.6 * len(datasets), 4.2), squeeze=False)
+    for ax, dataset in zip(axs[0], datasets):
+        shifts = sorted({key[3] for key in grouped if key[0] == dataset})
+        condition_names = ["in-distribution"] + shifts
+        x = np.arange(len(model_order))
+        width = min(0.18, 0.76 / max(len(condition_names), 1))
+        for cond_idx, condition_name in enumerate(condition_names):
+            means = []
+            for architecture, model in model_order:
+                if condition_name == "in-distribution":
+                    vals = base_grouped.get((dataset, architecture, model), [])
+                else:
+                    vals = grouped.get((dataset, architecture, model, condition_name), [])
+                means.append(float(np.mean(vals)) if vals else np.nan)
+            ax.bar(
+                x + (cond_idx - 0.5 * (len(condition_names) - 1)) * width,
+                means,
+                width=width,
+                label=condition_name,
+            )
+        ax.set_title(dataset)
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"{architecture}\n{model}" for architecture, model in model_order])
+        ax.set_ylim(0.0, 1.0)
+        ax.set_ylabel("Accuracy")
+    handles, labels = axs[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, frameon=False, loc="upper center", ncol=min(len(labels), 4))
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
+    fig.savefig(output_path, dpi=180)
+    plt.close(fig)
+    return True
+
+
+def plot_layer_geometry(layer_rows, output_path):
+    plt = maybe_import_pyplot()
+    if plt is None or not layer_rows:
+        return False
+    datasets = sorted({row["dataset"] for row in layer_rows})
+    model_order = [("mlp", "closed-form"), ("mlp", "backprop"), ("transformer", "closed-form"), ("transformer", "backprop")]
+    grouped = defaultdict(list)
+    for row in layer_rows:
+        grouped[(row["dataset"], row["architecture"], row["model"], row["layer"])].append(row)
+
+    fig, axs = plt.subplots(2, len(datasets), figsize=(4.2 * len(datasets), 7), squeeze=False, sharex=False)
+    for col_idx, dataset in enumerate(datasets):
+        for architecture, model in model_order:
+            layers = sorted({key[3] for key in grouped if key[0] == dataset and key[1] == architecture and key[2] == model})
+            if not layers:
+                continue
+            cka_input = [float(np.mean([item["cka_to_input"] for item in grouped[(dataset, architecture, model, layer)]])) for layer in layers]
+            cka_labels = [float(np.mean([item["cka_to_labels"] for item in grouped[(dataset, architecture, model, layer)]])) for layer in layers]
+            axs[0, col_idx].plot(layers, cka_input, marker="o", label=f"{architecture}-{model}")
+            axs[1, col_idx].plot(layers, cka_labels, marker="o", label=f"{architecture}-{model}")
+        axs[0, col_idx].set_title(dataset)
+        axs[0, col_idx].set_ylabel("CKA to input")
+        axs[1, col_idx].set_ylabel("CKA to labels")
+        axs[1, col_idx].set_xlabel("Layer")
+        axs[0, col_idx].set_ylim(0.0, 1.05)
+        axs[1, col_idx].set_ylim(0.0, 1.05)
+    handles, labels = axs[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, frameon=False, loc="upper center", ncol=4)
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.savefig(output_path, dpi=180)
+    plt.close(fig)
+    return True
+
+
+def plot_umap_results(latent_rows, output_path):
+    plt = maybe_import_pyplot()
+    if plt is None or not latent_rows:
+        return False
+    from matplotlib.lines import Line2D  # type: ignore
+
+    def group_sort_key(label):
+        if label == "other":
+            return (2, 10**9, label)
+        try:
+            return (0, int(label), label)
+        except Exception:
+            return (1, label)
+
+    datasets = sorted({row["dataset"] for row in latent_rows})
+    model_order = [("mlp", "closed-form"), ("mlp", "backprop"), ("transformer", "closed-form"), ("transformer", "backprop")]
+    dataset_groups = {
+        dataset: sorted({row["group_label"] for row in latent_rows if row["dataset"] == dataset}, key=group_sort_key)
+        for dataset in datasets
+    }
+    fig, axs = plt.subplots(len(datasets), len(model_order), figsize=(3.3 * len(model_order), 3.4 * len(datasets)), squeeze=False)
+
+    for row_idx, dataset in enumerate(datasets):
+        groups = dataset_groups[dataset]
+        cmap = plt.get_cmap("tab10" if len(groups) <= 10 else "tab20")
+        color_map = {group_label: cmap(group_idx % cmap.N) for group_idx, group_label in enumerate(groups)}
+        for col_idx, (architecture, model) in enumerate(model_order):
+            ax = axs[row_idx, col_idx]
+            subset = [row for row in latent_rows if row["dataset"] == dataset and row["architecture"] == architecture and row["model"] == model]
+            if not subset:
+                ax.set_visible(False)
+                continue
+            for group_label in groups:
+                items = [row for row in subset if row["group_label"] == group_label]
+                if not items:
+                    continue
+                ax.scatter(
+                    [row["x"] for row in items],
+                    [row["y"] for row in items],
+                    s=9,
+                    alpha=0.75,
+                    color=color_map[group_label],
+                )
+            if row_idx == 0:
+                ax.set_title(f"{architecture}-{model}")
+            if col_idx == 0:
+                ax.set_ylabel(dataset)
+            ax.set_xticks([])
+            ax.set_yticks([])
+        legend_handles = [
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                linestyle="",
+                markerfacecolor=color_map[group_label],
+                markeredgecolor=color_map[group_label],
+                markersize=5,
+                label=group_label,
+            )
+            for group_label in groups
+        ]
+        axs[row_idx, 0].legend(
+            handles=legend_handles,
+            title=f"{dataset} labels",
+            frameon=False,
+            loc="lower left",
+            bbox_to_anchor=(0.0, 1.02, float(len(model_order)), 0.25),
+            mode="expand",
+            ncol=min(len(groups), 6),
+            borderaxespad=0.0,
+        )
+    fig.tight_layout(rect=(0, 0, 1, 0.98), h_pad=2.0)
     fig.savefig(output_path, dpi=180)
     plt.close(fig)
     return True
@@ -1768,6 +2567,17 @@ def scaling_specs_for_axis(dataset_name, axis_name, seeds):
                         n_train=value,
                         n_test=base["n_test"],
                         seed=seed,
+                        task_type=base.get("task_type", "classification"),
+                        text_vocab_size=base.get("text_vocab_size", DatasetSpec.text_vocab_size),
+                        text_seq_len=base.get("text_seq_len", DatasetSpec.text_seq_len),
+                        text_embed_dim=base.get("text_embed_dim", DatasetSpec.text_embed_dim),
+                        text_drop_prob=base.get("text_drop_prob", DatasetSpec.text_drop_prob),
+                        text_dataset_name=base.get("text_dataset_name"),
+                        text_dataset_config=base.get("text_dataset_config"),
+                        text_fields=tuple(base.get("text_fields", DatasetSpec.text_fields)),
+                        label_field=base.get("label_field", DatasetSpec.label_field),
+                        eval_split=base.get("eval_split", DatasetSpec.eval_split),
+                        next_token_stride=base.get("next_token_stride", DatasetSpec.next_token_stride),
                     )
                 )
         return SCALING_DATA_VALUES, specs
@@ -1781,22 +2591,27 @@ def scaling_specs_for_axis(dataset_name, axis_name, seeds):
                     n_train=base["n_train"],
                     n_test=base["n_test"],
                     seed=seed,
+                    task_type=base.get("task_type", "classification"),
+                    text_vocab_size=base.get("text_vocab_size", DatasetSpec.text_vocab_size),
+                    text_seq_len=base.get("text_seq_len", DatasetSpec.text_seq_len),
+                    text_embed_dim=base.get("text_embed_dim", DatasetSpec.text_embed_dim),
+                    text_drop_prob=base.get("text_drop_prob", DatasetSpec.text_drop_prob),
+                    text_dataset_name=base.get("text_dataset_name"),
+                    text_dataset_config=base.get("text_dataset_config"),
+                    text_fields=tuple(base.get("text_fields", DatasetSpec.text_fields)),
+                    label_field=base.get("label_field", DatasetSpec.label_field),
+                    eval_split=base.get("eval_split", DatasetSpec.eval_split),
+                    next_token_stride=base.get("next_token_stride", DatasetSpec.next_token_stride),
                 )
             )
         if axis_name == "parameters":
-            return {
-                "mlp": SCALING_MLP_WIDTHS,
-                "transformer": SCALING_TRANSFORMER_PATCH_SIZES,
-            }, specs
-        return {
-            "mlp": SCALING_MLP_COMPUTE_DEPTHS,
-            "transformer": SCALING_TRANSFORMER_COMPUTE_DEPTHS,
-        }, specs
+            return SCALING_TRANSFORMER_TEXT_DIMS, specs
+        return SCALING_TRANSFORMER_CONTEXT_LENGTHS, specs
 
     raise ValueError(f"Unknown scaling axis: {axis_name}")
 
 
-def run_scaling_suite(dataset_name, mlp_winner, transformer_winner, mlp_config, transformer_config):
+def run_scaling_suite(dataset_name, transformer_winner, transformer_config):
     rows = []
 
     for axis_name in ["data", "parameters", "compute"]:
@@ -1804,72 +2619,55 @@ def run_scaling_suite(dataset_name, mlp_winner, transformer_winner, mlp_config, 
         if axis_name == "data":
             for spec in dataset_specs:
                 bundle = load_dataset_bundle(spec)
-                mlp_row = run_closed_form_mlp(bundle, mlp_winner, mlp_config, spec.seed)
-                mlp_row["axis"] = axis_name
-                mlp_row["scale_value"] = spec.n_train
-                rows.append(mlp_row)
-                mlp_bp = run_backprop_mlp(bundle, mlp_config, spec.seed)
-                mlp_bp["axis"] = axis_name
-                mlp_bp["scale_value"] = spec.n_train
-                rows.append(mlp_bp)
-
                 tr_row = run_closed_form_transformer(bundle, transformer_winner, transformer_config, spec.seed)
                 tr_row["axis"] = axis_name
                 tr_row["scale_value"] = spec.n_train
+                tr_row["compute_proxy"] = estimate_transformer_compute_proxy(bundle, transformer_config, "closed-form", transformer_winner)
+                tr_row["compute_unit"] = "ops_proxy"
                 rows.append(tr_row)
                 tr_bp = run_backprop_transformer(bundle, transformer_config, spec.seed)
                 tr_bp["axis"] = axis_name
                 tr_bp["scale_value"] = spec.n_train
+                tr_bp["compute_proxy"] = estimate_transformer_compute_proxy(bundle, transformer_config, "backprop")
+                tr_bp["compute_unit"] = "ops_proxy"
                 rows.append(tr_bp)
 
         elif axis_name == "parameters":
             for spec in dataset_specs:
-                bundle = load_dataset_bundle(spec)
-                for width in scale_values["mlp"]:
-                    mlp_cfg = MLPEvalConfig(**{**asdict(mlp_config), "width": width})
-                    mlp_row = run_closed_form_mlp(bundle, mlp_winner, mlp_cfg, spec.seed)
-                    mlp_row["axis"] = axis_name
-                    mlp_row["scale_value"] = width
-                    rows.append(mlp_row)
-                    mlp_bp = run_backprop_mlp(bundle, mlp_cfg, spec.seed)
-                    mlp_bp["axis"] = axis_name
-                    mlp_bp["scale_value"] = width
-                    rows.append(mlp_bp)
-
-                for patch_size in scale_values["transformer"]:
-                    tr_cfg = TransformerEvalConfig(**{**asdict(transformer_config), "patch_size": patch_size})
+                for embed_dim in scale_values:
+                    spec_dim = replace(spec, text_embed_dim=embed_dim)
+                    bundle = load_dataset_bundle(spec_dim)
+                    tr_cfg = TransformerEvalConfig(**{**asdict(transformer_config)})
                     tr_row = run_closed_form_transformer(bundle, transformer_winner, tr_cfg, spec.seed)
                     tr_row["axis"] = axis_name
-                    tr_row["scale_value"] = patch_size
+                    tr_row["scale_value"] = embed_dim
+                    tr_row["compute_proxy"] = estimate_transformer_compute_proxy(bundle, tr_cfg, "closed-form", transformer_winner)
+                    tr_row["compute_unit"] = "ops_proxy"
                     rows.append(tr_row)
                     tr_bp = run_backprop_transformer(bundle, tr_cfg, spec.seed)
                     tr_bp["axis"] = axis_name
-                    tr_bp["scale_value"] = patch_size
+                    tr_bp["scale_value"] = embed_dim
+                    tr_bp["compute_proxy"] = estimate_transformer_compute_proxy(bundle, tr_cfg, "backprop")
+                    tr_bp["compute_unit"] = "ops_proxy"
                     rows.append(tr_bp)
 
         elif axis_name == "compute":
             for spec in dataset_specs:
-                bundle = load_dataset_bundle(spec)
-                for depth in scale_values["mlp"]:
-                    mlp_cfg = MLPEvalConfig(**{**asdict(mlp_config), "depth": depth})
-                    mlp_row = run_closed_form_mlp(bundle, mlp_winner, mlp_cfg, spec.seed)
-                    mlp_row["axis"] = axis_name
-                    mlp_row["scale_value"] = depth
-                    rows.append(mlp_row)
-                    mlp_bp = run_backprop_mlp(bundle, mlp_cfg, spec.seed)
-                    mlp_bp["axis"] = axis_name
-                    mlp_bp["scale_value"] = depth
-                    rows.append(mlp_bp)
-
-                for depth in scale_values["transformer"]:
-                    tr_cfg = TransformerEvalConfig(**{**asdict(transformer_config), "depth": depth})
+                for context_len in scale_values:
+                    spec_ctx = replace(spec, text_seq_len=context_len)
+                    bundle = load_dataset_bundle(spec_ctx)
+                    tr_cfg = TransformerEvalConfig(**{**asdict(transformer_config)})
                     tr_row = run_closed_form_transformer(bundle, transformer_winner, tr_cfg, spec.seed)
                     tr_row["axis"] = axis_name
-                    tr_row["scale_value"] = depth
+                    tr_row["scale_value"] = context_len
+                    tr_row["compute_proxy"] = estimate_transformer_compute_proxy(bundle, tr_cfg, "closed-form", transformer_winner)
+                    tr_row["compute_unit"] = "ops_proxy"
                     rows.append(tr_row)
                     tr_bp = run_backprop_transformer(bundle, tr_cfg, spec.seed)
                     tr_bp["axis"] = axis_name
-                    tr_bp["scale_value"] = depth
+                    tr_bp["scale_value"] = context_len
+                    tr_bp["compute_proxy"] = estimate_transformer_compute_proxy(bundle, tr_cfg, "backprop")
+                    tr_bp["compute_unit"] = "ops_proxy"
                     rows.append(tr_bp)
 
     return rows
@@ -1887,13 +2685,24 @@ def build_dataset_specs(dataset_names, seeds):
                     n_train=base["n_train"],
                     n_test=base["n_test"],
                     seed=seed,
+                    task_type=base.get("task_type", "classification"),
+                    text_vocab_size=base.get("text_vocab_size", DatasetSpec.text_vocab_size),
+                    text_seq_len=base.get("text_seq_len", DatasetSpec.text_seq_len),
+                    text_embed_dim=base.get("text_embed_dim", DatasetSpec.text_embed_dim),
+                    text_drop_prob=base.get("text_drop_prob", DatasetSpec.text_drop_prob),
+                    text_dataset_name=base.get("text_dataset_name"),
+                    text_dataset_config=base.get("text_dataset_config"),
+                    text_fields=tuple(base.get("text_fields", DatasetSpec.text_fields)),
+                    label_field=base.get("label_field", DatasetSpec.label_field),
+                    eval_split=base.get("eval_split", DatasetSpec.eval_split),
+                    next_token_stride=base.get("next_token_stride", DatasetSpec.next_token_stride),
                 )
             )
     return specs
 
 
 def main():
-    supported_datasets = sorted(set(DEFAULT_DATASETS + ["mnist", "fashion_mnist", "cifar10"]))
+    supported_datasets = sorted(set(DATASET_REGISTRY) | {"mnist", "fashion_mnist", "cifar10"})
     parser = argparse.ArgumentParser(description="Broader closed-form vs backprop evaluation suite.")
     parser.add_argument("--datasets", nargs="+", choices=supported_datasets + ["all"], default=["all"])
     parser.add_argument("--run-selection", action="store_true")
@@ -1912,6 +2721,8 @@ def main():
     transformer_selection = []
     mlp_winner = None
     transformer_winner = None
+    mlp_config_overrides = {}
+    transformer_config_overrides = {}
     winner_source = None
 
     if args.reuse_winners_from is not None:
@@ -1919,6 +2730,8 @@ def main():
         payload = json.loads(reuse_path.read_text(encoding="utf-8"))
         mlp_winner = payload["winners"]["mlp"]
         transformer_winner = payload["winners"]["transformer"]
+        mlp_config_overrides = payload["winners"].get("mlp_config_overrides") or {}
+        transformer_config_overrides = payload["winners"].get("transformer_config_overrides") or {}
         selection_payload = payload.get("selection") or {}
         mlp_selection = selection_payload.get("mlp") or []
         transformer_selection = selection_payload.get("transformer") or []
@@ -1934,13 +2747,20 @@ def main():
         inferred = infer_winners_from_existing_logs()
         mlp_winner = inferred["mlp_winner"]
         transformer_winner = inferred["transformer_winner"]
+        mlp_config_overrides = inferred.get("mlp_config_overrides") or {}
+        transformer_config_overrides = inferred.get("transformer_config_overrides") or {}
         mlp_selection = inferred["mlp_log_summary"]
         transformer_selection = inferred["transformer_log_summary"]
         winner_source = "existing_logs"
 
+    if mlp_config_overrides:
+        mlp_config = replace(mlp_config, **mlp_config_overrides)
+    if transformer_config_overrides:
+        transformer_config = replace(transformer_config, **transformer_config_overrides)
+
     main_rows = []
     main_summary = []
-    analytics_tables = {"run_table": [], "ood_table": []}
+    analytics_tables = {"run_table": [], "ood_table": [], "layer_table": [], "latent_table": []}
     if not args.skip_main:
         main_rows = run_main_comparison(
             dataset_specs,
@@ -1958,9 +2778,7 @@ def main():
     if not args.skip_scaling:
         scaling_rows = run_scaling_suite(
             dataset_name=DEFAULT_SCALING_DATASET,
-            mlp_winner=mlp_winner,
             transformer_winner=transformer_winner,
-            mlp_config=mlp_config,
             transformer_config=transformer_config,
         )
         scaling_aggregated, scaling_fits = summarize_scaling_rows(scaling_rows)
@@ -1977,15 +2795,27 @@ def main():
     json_path = default_json_path(json_name) if args.json_out is None else resolve_json_path(args.json_out)
     run_table_path = default_json_path("broader_eval_suite_run_table.jsonl")
     ood_table_path = default_json_path("broader_eval_suite_ood_table.jsonl")
+    layer_table_path = default_json_path("broader_eval_suite_layer_table.jsonl")
+    latent_table_path = default_json_path("broader_eval_suite_latent_umap_table.jsonl")
     selection_table_path = default_json_path("broader_eval_suite_selection_table.jsonl")
     scaling_table_path = default_json_path("broader_eval_suite_scaling_table.jsonl")
     scaling_summary_path = default_json_path("broader_eval_suite_scaling_summary.jsonl")
     scaling_fit_path = default_json_path("broader_eval_suite_scaling_fit_table.jsonl")
-    main_plot_path = default_plot_path("broader_eval_suite_summary.png")
-    scaling_plot_path = default_plot_path("broader_eval_suite_scaling.png")
+    main_plot_path = default_plot_path(f"{PLOT_SUBDIR}/broader_eval_suite_summary.png")
+    scaling_plot_path = default_plot_path(f"{PLOT_SUBDIR}/broader_eval_suite_scaling.png")
+    ood_plot_path = default_plot_path(f"{PLOT_SUBDIR}/broader_eval_suite_ood.png")
+    layer_plot_path = default_plot_path(f"{PLOT_SUBDIR}/broader_eval_suite_interpretability.png")
+    umap_plot_path = default_plot_path(f"{PLOT_SUBDIR}/broader_eval_suite_umap.png")
 
     main_plot_ok = bool(main_summary) and plot_main_results(main_summary, main_plot_path)
     scaling_plot_ok = bool(scaling_aggregated) and plot_scaling_results(scaling_aggregated, scaling_fits, scaling_plot_path)
+    ood_plot_ok = bool(analytics_tables["run_table"]) and bool(analytics_tables["ood_table"]) and plot_ood_results(
+        analytics_tables["run_table"],
+        analytics_tables["ood_table"],
+        ood_plot_path,
+    )
+    layer_plot_ok = bool(analytics_tables["layer_table"]) and plot_layer_geometry(analytics_tables["layer_table"], layer_plot_path)
+    umap_plot_ok = bool(analytics_tables["latent_table"]) and plot_umap_results(analytics_tables["latent_table"], umap_plot_path)
     selection_table = [
         {"architecture": "mlp", "winner_source": winner_source, **row}
         for row in mlp_selection
@@ -2015,7 +2845,9 @@ def main():
         },
         "winners": {
             "mlp": mlp_winner,
+            "mlp_config_overrides": mlp_config_overrides,
             "transformer": transformer_winner,
+            "transformer_config_overrides": transformer_config_overrides,
         },
         "main_results": main_rows,
         "main_summary": main_summary,
@@ -2026,12 +2858,17 @@ def main():
         "artifacts": {
             "run_table": str(run_table_path),
             "ood_table": str(ood_table_path),
+            "layer_table": str(layer_table_path),
+            "latent_umap_table": str(latent_table_path),
             "selection_table": str(selection_table_path),
             "scaling_table": str(scaling_table_path),
             "scaling_summary": str(scaling_summary_path),
             "scaling_fit_table": str(scaling_fit_path),
             "main_plot": str(main_plot_path) if main_plot_ok else None,
             "scaling_plot": str(scaling_plot_path) if scaling_plot_ok else None,
+            "ood_plot": str(ood_plot_path) if ood_plot_ok else None,
+            "interpretability_plot": str(layer_plot_path) if layer_plot_ok else None,
+            "umap_plot": str(umap_plot_path) if umap_plot_ok else None,
         },
     }
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -2039,6 +2876,10 @@ def main():
         run_table_path.write_text("\n".join(json.dumps(row) for row in analytics_tables["run_table"]) + "\n", encoding="utf-8")
     if analytics_tables["ood_table"]:
         ood_table_path.write_text("\n".join(json.dumps(row) for row in analytics_tables["ood_table"]) + "\n", encoding="utf-8")
+    if analytics_tables["layer_table"]:
+        layer_table_path.write_text("\n".join(json.dumps(row) for row in analytics_tables["layer_table"]) + "\n", encoding="utf-8")
+    if analytics_tables["latent_table"]:
+        latent_table_path.write_text("\n".join(json.dumps(row) for row in analytics_tables["latent_table"]) + "\n", encoding="utf-8")
     if selection_table:
         selection_table_path.write_text("\n".join(json.dumps(row) for row in selection_table) + "\n", encoding="utf-8")
     if scaling_rows:

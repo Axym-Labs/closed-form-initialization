@@ -283,7 +283,7 @@ def _solve_context_output(context1, context2, input1, input2, lambda_reg, target
     gram = design.T @ design
     rhs = design.T @ targets
     output_map = np.linalg.solve(
-        gram + lambda_reg * np.eye(gram.shape[0], dtype=np.float64),
+        gram + lambda_reg * np.eye(gram.shape[0], dtype=gram.dtype),
         rhs,
     )
 
@@ -300,6 +300,40 @@ def _solve_context_output(context1, context2, input1, input2, lambda_reg, target
         "residual_mode": residual_mode,
         "target_stats": target_stats,
     }
+
+
+def _analytic_shared_score_scale(
+    score_tokens1,
+    score_tokens2,
+    sigma_inv_sqrt,
+    projection_heads,
+    target_score_std=0.5,
+    min_scale=0.25,
+    max_scale=6.0,
+):
+    whitened1 = score_tokens1 @ sigma_inv_sqrt
+    whitened2 = score_tokens2 @ sigma_inv_sqrt
+    total_sum = 0.0
+    total_sq_sum = 0.0
+    total_count = 0
+
+    for projection in projection_heads:
+        scale_norm = np.sqrt(max(projection.shape[1], 1))
+        projected1 = _normalize_last_axis(whitened1 @ projection)
+        projected2 = _normalize_last_axis(whitened2 @ projection)
+        for projected in (projected1, projected2):
+            scores = np.matmul(projected, np.swapaxes(projected, 1, 2)) / scale_norm
+            total_sum += float(np.sum(scores, dtype=np.float64))
+            total_sq_sum += float(np.sum(scores * scores, dtype=np.float64))
+            total_count += int(scores.size)
+
+    if total_count <= 0:
+        return 1.0, 0.0
+    mean = total_sum / total_count
+    variance = max(total_sq_sum / total_count - mean * mean, 1e-8)
+    score_std = float(np.sqrt(variance))
+    score_scale = float(np.clip(target_score_std / max(score_std, 1e-8), min_scale, max_scale))
+    return score_scale, score_std
 
 
 def _attention_solution_loss(context1, context2, input1, input2, solved, lambda_reg, target_mode):
@@ -705,21 +739,22 @@ def _score_alignment_power_basis(
     z2 = score_tokens2 @ sigma_inv_sqrt
     token_count = max(z1.shape[1], 1)
     dim = z1.shape[-1]
+    basis_dtype = np.result_type(z1.dtype, z2.dtype, sigma_inv_sqrt.dtype)
 
     if init_basis is None or init_basis.size == 0:
-        init_basis = _random_orthogonal_basis(dim, rank, seed)
+        init_basis = _random_orthogonal_basis(dim, rank, seed).astype(basis_dtype, copy=False)
 
     directions = []
     objective_values = []
     for comp in range(int(max(1, rank))):
         if comp < init_basis.shape[1]:
-            direction = init_basis[:, comp].astype(np.float64, copy=True)
+            direction = init_basis[:, comp].astype(basis_dtype, copy=True)
         else:
-            direction = _random_orthogonal_basis(dim, 1, seed + comp)[:, 0]
+            direction = _random_orthogonal_basis(dim, 1, seed + comp)[:, 0].astype(basis_dtype, copy=False)
         direction = _orthogonalize_vector(direction, directions)
         norm = np.linalg.norm(direction)
         if norm <= 1e-12:
-            direction = _random_orthogonal_basis(dim, 1, seed + 101 + comp)[:, 0]
+            direction = _random_orthogonal_basis(dim, 1, seed + 101 + comp)[:, 0].astype(basis_dtype, copy=False)
             direction = _orthogonalize_vector(direction, directions)
             norm = np.linalg.norm(direction)
         direction = direction / max(norm, 1e-12)
@@ -748,7 +783,7 @@ def _score_alignment_power_basis(
         directions.append(direction)
         objective_values.append(float(np.mean(coeff * coeff)))
 
-    return np.column_stack(directions), np.asarray(objective_values, dtype=np.float64)
+    return np.column_stack(directions).astype(basis_dtype, copy=False), np.asarray(objective_values, dtype=basis_dtype)
 
 
 def _complete_basis_in_complement(dim, rank, seed, previous_basis=None, initial=None):
@@ -2584,7 +2619,7 @@ def fit_score_power_scaled_self_attention_from_token_pairs(
         seed=seed,
         score_mode="token-centered",
         attention_kind="score-self-power-gain",
-        scale_candidates=scale_candidates or [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0],
+        scale_candidates=None,
     )
 
 
@@ -3508,6 +3543,16 @@ def _fit_score_power_self_attention_from_token_pairs(
     head_indices = _projection_head_indices(basis.shape[1], basis.shape[1], num_heads)
     projection_heads = [basis[:, idxs] for idxs in head_indices]
     head_layout = _build_spectral_head_layout("spectral-self", len(projection_heads))
+    analytic_score_scale = None
+    analytic_score_std = None
+    if scale_candidates is None and attention_kind == "score-self-power-gain":
+        analytic_score_scale, analytic_score_std = _analytic_shared_score_scale(
+            score_tokens1,
+            score_tokens2,
+            sigma_inv_sqrt,
+            projection_heads,
+        )
+        head_layout = [{**head, "score_scale": analytic_score_scale} for head in head_layout]
 
     fit_fn = _fit_self_attention_with_projections if scale_candidates is None else _fit_self_attention_with_scale_search
     fit_kwargs = {
@@ -3532,9 +3577,14 @@ def _fit_score_power_self_attention_from_token_pairs(
     }
     if scale_candidates is not None:
         fit_kwargs["scale_candidates"] = scale_candidates
-    return fit_fn(
+    model = fit_fn(
         **fit_kwargs,
     )
+    if analytic_score_scale is not None:
+        model["selected_score_scales"] = {"all": float(analytic_score_scale)}
+        model["analytic_score_std"] = float(analytic_score_std)
+        model["analytic_score_target_std"] = 0.5
+    return model
 
 
 def fit_mixed_self_objective_attention_from_token_pairs(
