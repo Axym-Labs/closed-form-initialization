@@ -2,7 +2,7 @@
 
 ## Real-world initialization benchmark
 
-This repository now evaluates the project as an **initialization method**, not as a fully closed-form end-to-end learner.
+This repository now evaluates the method for parameter intialization, not as a fully closed-form end-to-end learner.
 
 The main benchmark runner is [init_finetune_realworld_eval.py](/c:/Users/DavWi/Main/Projekte/vicreg_superlinear/init_finetune_realworld_eval.py). It compares:
 
