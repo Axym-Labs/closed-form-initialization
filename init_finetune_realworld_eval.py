@@ -16,7 +16,7 @@ import broader_eval_suite as bes
 import closed_form_barlow_twins as cfbt
 import dual_path_residual_cifar as dpr
 import transformer_cifar_compare as tcc
-from project_paths import default_json_path, default_plot_path, resolve_json_path
+from project_paths import default_json_path, default_plot_path, repo_relative_path, resolve_json_path
 
 
 BENCHMARK_NAME = "init_finetune_realworld_eval"
@@ -1861,11 +1861,11 @@ def main():
             for scenario in scenarios
         ],
         "plots": {
-            "anytime": anytime_plot,
-            "pareto": pareto_plot,
-            "low_data": low_data_plot,
-            "ood": ood_plot,
-            "transfer": transfer_plot,
+            "anytime": repo_relative_path(anytime_plot),
+            "pareto": repo_relative_path(pareto_plot),
+            "low_data": repo_relative_path(low_data_plot),
+            "ood": repo_relative_path(ood_plot),
+            "transfer": repo_relative_path(transfer_plot),
         },
     }
 

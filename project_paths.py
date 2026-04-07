@@ -38,3 +38,13 @@ def resolve_plot_path(path: Path) -> Path:
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def repo_relative_path(path: Path | str) -> str:
+    path = Path(path)
+    if not path.is_absolute():
+        return path.as_posix()
+    try:
+        return path.resolve(strict=False).relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()

@@ -10,7 +10,7 @@ The main result is negative for the intended method: `closed-form init + compute
 
 ## Benchmark setup
 
-The main benchmark runner is [init_finetune_realworld_eval.py](/c:/Users/DavWi/Main/Projekte/vicreg_superlinear/init_finetune_realworld_eval.py). It compares:
+The main benchmark runner is [init_finetune_realworld_eval.py](init_finetune_realworld_eval.py). It compares:
 
 - `backprop`: ordinary training from scratch
 - `closed-form init + compute-matched fine-tune`: build the encoder analytically from paired views, then fine-tune with the same total compute budget as backprop
@@ -83,11 +83,11 @@ Shared initialization did not rescue the compute-matched fine-tune variant. Acro
 
 ## Plots and artifacts
 
-Plots are in `results/plots/init_finetune_realworld_eval/`, and the structured analytics are in `results/json/` with the `init_finetune_realworld_eval*` prefix.
+The two key figures used in this README are tracked in `docs/figures/`; full local benchmark outputs are written under `results/` and are git-ignored.
 
-![Pareto frontiers](results/plots/init_finetune_realworld_eval/init_finetune_realworld_eval_pareto.png)
+![Pareto frontiers](docs/figures/init_finetune_realworld_eval_pareto.png)
 
-![Anytime curves](results/plots/init_finetune_realworld_eval/init_finetune_realworld_eval_anytime.png)
+![Anytime curves](docs/figures/init_finetune_realworld_eval_anytime.png)
 
 ## Conclusion
 

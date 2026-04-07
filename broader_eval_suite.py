@@ -22,7 +22,7 @@ import cifar_shared
 import closed_form_barlow_twins as cfbt
 import dual_path_residual_cifar as dpr
 import transformer_cifar_compare as tcc
-from project_paths import default_json_path, default_plot_path, resolve_json_path
+from project_paths import default_json_path, default_plot_path, repo_relative_path, resolve_json_path
 
 
 MAIN_SEEDS = [7, 11, 19]
@@ -3537,19 +3537,19 @@ def main():
         "scaling_summary": scaling_aggregated,
         "scaling_fits": scaling_fits,
         "artifacts": {
-            "run_table": str(run_table_path),
-            "ood_table": str(ood_table_path),
-            "layer_table": str(layer_table_path),
-            "latent_umap_table": str(latent_table_path),
-            "selection_table": str(selection_table_path),
-            "scaling_table": str(scaling_table_path),
-            "scaling_summary": str(scaling_summary_path),
-            "scaling_fit_table": str(scaling_fit_path),
-            "main_plot": str(main_plot_path) if main_plot_ok else None,
-            "scaling_plot": str(scaling_plot_path) if scaling_plot_ok else None,
-            "ood_plot": str(ood_plot_path) if ood_plot_ok else None,
-            "interpretability_plot": str(layer_plot_path) if layer_plot_ok else None,
-            "umap_plot": str(umap_plot_path) if umap_plot_ok else None,
+            "run_table": repo_relative_path(run_table_path),
+            "ood_table": repo_relative_path(ood_table_path),
+            "layer_table": repo_relative_path(layer_table_path),
+            "latent_umap_table": repo_relative_path(latent_table_path),
+            "selection_table": repo_relative_path(selection_table_path),
+            "scaling_table": repo_relative_path(scaling_table_path),
+            "scaling_summary": repo_relative_path(scaling_summary_path),
+            "scaling_fit_table": repo_relative_path(scaling_fit_path),
+            "main_plot": repo_relative_path(main_plot_path) if main_plot_ok else None,
+            "scaling_plot": repo_relative_path(scaling_plot_path) if scaling_plot_ok else None,
+            "ood_plot": repo_relative_path(ood_plot_path) if ood_plot_ok else None,
+            "interpretability_plot": repo_relative_path(layer_plot_path) if layer_plot_ok else None,
+            "umap_plot": repo_relative_path(umap_plot_path) if umap_plot_ok else None,
         },
     }
     json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

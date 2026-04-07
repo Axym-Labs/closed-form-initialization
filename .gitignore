@@ -4,7 +4,7 @@
 /__pycache__
 /logs/
 /results/logs/
-/results/json/debug/
-/results/json/**/*.json
-/results/json/**/*.jsonl
+/results/json/
+/results/plots/
+/results/*.pdf
 *.log
