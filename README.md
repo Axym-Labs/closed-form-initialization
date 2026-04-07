@@ -1,5 +1,3 @@
-# vicreg_superlinear
-
 ## Introduction
 
 This repository studies **closed-form neural initialization**, with the main emphasis on transformers. Here, “closed-form” means that the encoder is built analytically from paired training views using covariance/eigendecomposition and ridge-style solves, instead of being obtained by end-to-end gradient descent. For transformers, this yields a spectral self-attention block plus analytically fitted feed-forward maps; an MLP variant is included as a secondary baseline. The key question is whether this analytic encoder is useful as an initialization for supervised learning.
