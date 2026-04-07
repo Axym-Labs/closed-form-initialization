@@ -26,9 +26,9 @@ from project_paths import default_json_path, default_plot_path, resolve_json_pat
 
 
 MAIN_SEEDS = [7, 11, 19]
-SCALING_SEEDS = [7, 11]
-SCALING_DATA_VALUES = [2000, 4000, 8000, 16000]
-SCALING_TRANSFORMER_TEXT_DIMS = [32, 64, 96, 128]
+SCALING_SEEDS = [7, 11, 19]
+SCALING_DATA_VALUES = [1000, 2000, 4000, 8000, 16000, 32000, 64000]
+SCALING_TRANSFORMER_TEXT_DIMS = [16, 32, 64, 128, 192]
 SCALING_TRANSFORMER_CONTEXT_LENGTHS = [8, 16, 32, 48]
 
 MLP_CANDIDATES = [
@@ -56,6 +56,9 @@ DEFAULT_TRANSFORMER_CONFIG_OVERRIDES = {
 DEFAULT_DATASETS = ["covtype", "cifar100", "qnli", "wikitext2_next_token"]
 DEFAULT_SCALING_DATASET = "wikitext2_next_token_scale"
 PLOT_SUBDIR = "broader_eval_suite"
+SCALING_AXES = ["data", "parameters"]
+FINE_TUNE_MODEL_NAME = "closed-form+backprop-ft"
+CONTEXT_LENGTH_AXIS_NAME = "compute (context-length)"
 
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9']+|[.,!?;:]")
 TEXT_PAD = 0
@@ -230,8 +233,8 @@ DATASET_REGISTRY = {
     },
     "wikitext2_next_token_scale": {
         "suite": "token-mask",
-        "n_train": 8000,
-        "n_test": 2000,
+        "n_train": 16000,
+        "n_test": 8000,
         "task_type": "next_token",
         "text_dataset_name": "wikitext",
         "text_dataset_config": "wikitext-2-raw-v1",
@@ -267,6 +270,63 @@ def evaluate_logits(logits, y):
     return float((np.argmax(logits, axis=1) == y).mean())
 
 
+def evaluate_cross_entropy(logits, y):
+    logits = np.asarray(logits, dtype=np.float64)
+    labels = np.asarray(y, dtype=np.int64)
+    shifted = logits - np.max(logits, axis=1, keepdims=True)
+    log_probs = shifted - np.log(np.exp(shifted).sum(axis=1, keepdims=True))
+    return float(-np.mean(log_probs[np.arange(labels.shape[0]), labels]))
+
+
+def fit_logit_temperature(logits, y, max_samples=4096, seed=0):
+    logits = np.asarray(logits, dtype=np.float32)
+    labels = np.asarray(y, dtype=np.int64)
+    if logits.ndim != 2 or logits.shape[0] != labels.shape[0] or logits.shape[0] == 0:
+        return 1.0
+    if logits.shape[0] > max_samples:
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(logits.shape[0], size=max_samples, replace=False)
+        logits = logits[idx]
+        labels = labels[idx]
+    logits_t = torch.from_numpy(logits)
+    labels_t = torch.from_numpy(labels)
+    log_scale = torch.zeros((), dtype=torch.float32, requires_grad=True)
+    optimizer = torch.optim.LBFGS([log_scale], lr=0.5, max_iter=25, line_search_fn="strong_wolfe")
+
+    def closure():
+        optimizer.zero_grad(set_to_none=True)
+        loss = F.cross_entropy(logits_t * torch.exp(log_scale), labels_t)
+        loss.backward()
+        return loss
+
+    optimizer.step(closure)
+    return float(torch.exp(log_scale.detach()).cpu().item())
+
+
+def scaling_metrics_from_logits(logits, y, task_type):
+    accuracy = evaluate_logits(logits, y)
+    metrics = {
+        "classifier_accuracy": accuracy,
+        "scaling_metric_name": "error_rate",
+        "scaling_metric_label": "Error rate",
+        "scaling_metric_value": float(1.0 - accuracy),
+        "scaling_fit_type": "power-law",
+    }
+    if task_type == "next_token":
+        cross_entropy = evaluate_cross_entropy(logits, y)
+        metrics.update(
+            {
+                "validation_cross_entropy": cross_entropy,
+                "validation_perplexity": float(math.exp(min(cross_entropy, 30.0))),
+                "scaling_metric_name": "validation_cross_entropy",
+                "scaling_metric_label": "Validation cross-entropy",
+                "scaling_metric_value": cross_entropy,
+                "scaling_fit_type": "log-linear",
+            }
+        )
+    return metrics
+
+
 def mean_std(values):
     vals = np.asarray(values, dtype=np.float64)
     return float(vals.mean()), float(vals.std(ddof=0))
@@ -277,6 +337,55 @@ def confidence_interval(values):
     if vals.size <= 1:
         return 0.0
     return float(1.96 * vals.std(ddof=1) / np.sqrt(vals.size))
+
+
+def make_train_loader(dataset, batch_size, shuffle=True):
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        drop_last=False,
+        num_workers=0,
+        pin_memory=torch.cuda.is_available(),
+    )
+
+
+def compute_matched_step_budget(total_budget, init_budget, finetune_epoch_budget, steps_per_epoch, max_epochs=None):
+    if steps_per_epoch <= 0 or finetune_epoch_budget <= 0.0:
+        return 0, 0.0
+    total_budget = float(max(total_budget, 0.0))
+    remaining = float(max(total_budget - max(init_budget, 0.0), 0.0))
+    if remaining <= 0.0:
+        return 0, float(max(init_budget, 0.0))
+    step_budget = finetune_epoch_budget / steps_per_epoch
+    max_steps = None if max_epochs is None else steps_per_epoch * max_epochs
+    budget_limited_steps = int(math.floor(remaining / max(step_budget, 1e-12)))
+    used_steps = budget_limited_steps if max_steps is None else min(max_steps, budget_limited_steps)
+    used_budget = float(init_budget + used_steps * step_budget)
+    return used_steps, used_budget
+
+
+def run_training_steps(train_loader, total_steps, step_fn):
+    if total_steps <= 0:
+        return []
+    epoch_stats = []
+    epoch_losses = []
+    steps_per_epoch = max(len(train_loader), 1)
+    iterator = iter(train_loader)
+    for step_idx in range(total_steps):
+        try:
+            batch = next(iterator)
+        except StopIteration:
+            iterator = iter(train_loader)
+            batch = next(iterator)
+        loss_value = float(step_fn(batch))
+        epoch_losses.append(loss_value)
+        if (step_idx + 1) % steps_per_epoch == 0:
+            epoch_stats.append({"loss": float(np.mean(epoch_losses)), "steps": len(epoch_losses)})
+            epoch_losses = []
+    if epoch_losses:
+        epoch_stats.append({"loss": float(np.mean(epoch_losses)), "steps": len(epoch_losses)})
+    return epoch_stats
 
 
 def maybe_import_pyplot():
@@ -1225,7 +1334,7 @@ def build_analysis_payload(bundle, seed, predict_logits_fn, encode_final_fn, enc
     }
 
 
-def run_closed_form_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPEvalConfig, seed: int, collect_analysis: bool = False):
+def fit_closed_form_mlp_state(bundle: RawDatasetBundle, method_name: str, config: MLPEvalConfig, seed: int):
     set_seed(seed)
     base_tr, base_te, view1_tr, view2_tr, view1_te, view2_te = build_mlp_arrays(bundle, seed)
     train_arrays, test_arrays, initial_mean, initial_scale = normalize_hidden_with_stats(
@@ -1321,6 +1430,30 @@ def run_closed_form_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPE
         )
     fit_time = time.perf_counter() - start
 
+    return {
+        "bundle": bundle,
+        "method_name": method_name,
+        "config": config,
+        "seed": seed,
+        "initial_mean": initial_mean,
+        "initial_scale": initial_scale,
+        "layer_states": layer_states,
+        "layers": layers,
+        "yhat_te": yhat_te,
+        "output_map": output_map,
+        "activation_param_count": activation_param_count,
+        "output_param_count": output_param_count,
+        "fit_time_sec": fit_time,
+    }
+
+
+def run_closed_form_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPEvalConfig, seed: int, collect_analysis: bool = False):
+    state = fit_closed_form_mlp_state(bundle, method_name, config, seed)
+    initial_mean = state["initial_mean"]
+    initial_scale = state["initial_scale"]
+    layer_states = state["layer_states"]
+    output_map = state["output_map"]
+
     analysis = None
     if collect_analysis:
         def encode_layers(raw_inputs):
@@ -1377,12 +1510,14 @@ def run_closed_form_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPE
         "suite": bundle.suite,
         "seed": seed,
         "closed_form_method": method_name,
-        "classifier_accuracy": evaluate_logits(yhat_te, bundle.yte) if config.dual_mapping else layers[-1]["classifier_accuracy"],
-        "layers": layers,
-        "hidden_param_count": activation_param_count,
-        "output_param_count": output_param_count,
-        "total_parameter_count": activation_param_count + output_param_count,
-        "fit_time_sec": fit_time,
+        "classifier_accuracy": (
+            evaluate_logits(state["yhat_te"], bundle.yte) if config.dual_mapping else state["layers"][-1]["classifier_accuracy"]
+        ),
+        "layers": state["layers"],
+        "hidden_param_count": state["activation_param_count"],
+        "output_param_count": state["output_param_count"],
+        "total_parameter_count": state["activation_param_count"] + state["output_param_count"],
+        "fit_time_sec": state["fit_time_sec"],
         "config": asdict(config),
         "analysis": analysis,
     }
@@ -1404,6 +1539,239 @@ class SupervisedMLP(nn.Module):
         return self.head(self.encode(x))
 
 
+def apply_mlp_activation_torch(x, activation):
+    if activation == "relu":
+        return torch.relu(x)
+    if activation == "gelu":
+        return F.gelu(x)
+    raise ValueError(f"Unsupported MLP activation for fine-tuning: {activation}")
+
+
+def estimate_mlp_compute_proxy(bundle: RawDatasetBundle, config: MLPEvalConfig, model_kind: str):
+    input_dim = int(build_base_mlp_features(bundle, bundle.train_raw[:1]).shape[1])
+    train_count = int(len(bundle.ytr))
+    eval_count = int(len(bundle.yte))
+    dims = [input_dim] + [config.width] * config.depth
+    hidden_forward = sum(dims[idx] * dims[idx + 1] for idx in range(config.depth))
+    per_layer_head_dim = [dims[idx] if config.output_source == "pre-hidden" else dims[idx + 1] for idx in range(config.depth)]
+
+    if model_kind == "backprop":
+        per_example = hidden_forward + dims[-1] * bundle.num_classes
+        return float(config.epochs * train_count * per_example)
+
+    if model_kind == "fine-tune":
+        head_forward = sum(dim * bundle.num_classes for dim in per_layer_head_dim) if config.dual_mapping else dims[-1] * bundle.num_classes
+        per_example = hidden_forward + head_forward
+        return float(train_count * per_example)
+
+    if model_kind == "closed-form":
+        current_dim = input_dim
+        fit_views = 2.0 * train_count
+        apply_views = 3.0 * train_count + 3.0 * eval_count
+        total = 0.0
+        for _ in range(config.depth):
+            next_dim = min(config.width, current_dim)
+            total += fit_views * current_dim * next_dim
+            total += apply_views * current_dim * next_dim
+            head_dim = current_dim if config.output_source == "pre-hidden" else next_dim
+            if config.dual_mapping:
+                total += train_count * head_dim * bundle.num_classes
+            current_dim = next_dim
+        if not config.dual_mapping:
+            total += train_count * current_dim * bundle.num_classes
+        return float(total)
+
+    raise ValueError(f"Unknown MLP compute proxy model kind: {model_kind}")
+
+
+class ClosedFormFineTuneMLP(nn.Module):
+    def __init__(self, input_dim, num_classes, state, activation):
+        super().__init__()
+        self.num_classes = num_classes
+        self.activation = activation
+        self.hidden = nn.ModuleList()
+        self.pre_heads = nn.ModuleDict()
+        self.post_heads = nn.ModuleDict()
+        self.final_head = None
+
+        self.register_buffer("initial_mean", torch.from_numpy(state["initial_mean"]).float())
+        self.register_buffer("initial_scale", torch.from_numpy(state["initial_scale"]).float())
+
+        current_dim = input_dim
+        for layer_idx, layer_state in enumerate(state["layer_states"]):
+            fitted = layer_state["fitted"]
+            transform = torch.from_numpy(fitted["transform_base"]).float()
+            linear = nn.Linear(current_dim, transform.shape[1], bias=False)
+            linear.weight.data.copy_(transform.T)
+            self.hidden.append(linear)
+
+            pre_map = layer_state["pre_output_map"]
+            if pre_map is not None:
+                head = nn.Linear(current_dim, num_classes, bias=False)
+                head.weight.data.copy_(torch.from_numpy(pre_map.T).float())
+                self.pre_heads[str(layer_idx)] = head
+
+            post_map = layer_state["post_output_map"]
+            next_dim = transform.shape[1]
+            if post_map is not None:
+                head = nn.Linear(next_dim, num_classes, bias=False)
+                head.weight.data.copy_(torch.from_numpy(post_map.T).float())
+                self.post_heads[str(layer_idx)] = head
+
+            center = layer_state["base_center_mean"]
+            center_tensor = torch.from_numpy(center).float() if center is not None else torch.zeros((0,), dtype=torch.float32)
+            self.register_buffer(f"base_center_mean_{layer_idx}", center_tensor)
+            self.register_buffer(f"norm_mean_{layer_idx}", torch.from_numpy(layer_state["norm_mean"]).float())
+            self.register_buffer(f"norm_scale_{layer_idx}", torch.from_numpy(layer_state["norm_scale"]).float())
+            current_dim = next_dim
+
+        if state["output_map"] is not None:
+            head = nn.Linear(current_dim, num_classes, bias=False)
+            head.weight.data.copy_(torch.from_numpy(state["output_map"].T).float())
+            self.final_head = head
+
+    def encode_layers(self, x):
+        hidden = (x - self.initial_mean) / self.initial_scale
+        collected = [hidden]
+        cumulative = hidden.new_zeros((hidden.shape[0], self.num_classes))
+        depth_logits = []
+        for layer_idx, layer in enumerate(self.hidden):
+            pre_key = str(layer_idx)
+            pre_head = self.pre_heads[pre_key] if pre_key in self.pre_heads else None
+            if pre_head is not None:
+                cumulative = cumulative + pre_head(hidden)
+            hidden = apply_mlp_activation_torch(layer(hidden), self.activation)
+            center = getattr(self, f"base_center_mean_{layer_idx}")
+            if center.numel() > 0:
+                hidden = hidden - center
+            post_key = str(layer_idx)
+            post_head = self.post_heads[post_key] if post_key in self.post_heads else None
+            if post_head is not None:
+                cumulative = cumulative + post_head(hidden)
+            hidden = (hidden - getattr(self, f"norm_mean_{layer_idx}")) / getattr(self, f"norm_scale_{layer_idx}")
+            collected.append(hidden)
+            if len(self.pre_heads) or len(self.post_heads):
+                depth_logits.append(cumulative)
+        if self.final_head is not None:
+            final_logits = self.final_head(hidden)
+            depth_logits = [final_logits]
+        return collected, depth_logits
+
+    def encode(self, x):
+        return self.encode_layers(x)[0][-1]
+
+    def forward(self, x):
+        _, depth_logits = self.encode_layers(x)
+        return depth_logits
+
+
+def run_closed_form_backprop_finetune_mlp(bundle: RawDatasetBundle, method_name: str, config: MLPEvalConfig, seed: int, collect_analysis: bool = False):
+    state = fit_closed_form_mlp_state(bundle, method_name, config, seed)
+    xtr_np = build_base_mlp_features(bundle, bundle.train_raw).astype(np.float32)
+    xte_np = build_base_mlp_features(bundle, bundle.test_raw).astype(np.float32)
+    xtr = torch.from_numpy(xtr_np)
+    xte = torch.from_numpy(xte_np)
+    ytr = torch.from_numpy(bundle.ytr).long()
+    train_loader = make_train_loader(TensorDataset(xtr, ytr), batch_size=config.batch_size, shuffle=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = ClosedFormFineTuneMLP(xtr_np.shape[1], bundle.num_classes, state, config.activation).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    criterion = nn.CrossEntropyLoss()
+
+    total_budget = estimate_mlp_compute_proxy(bundle, config, "backprop")
+    init_budget = estimate_mlp_compute_proxy(bundle, config, "closed-form")
+    finetune_epoch_budget = estimate_mlp_compute_proxy(bundle, config, "fine-tune")
+    fine_tune_steps, used_budget = compute_matched_step_budget(
+        total_budget,
+        init_budget,
+        finetune_epoch_budget,
+        len(train_loader),
+    )
+
+    def train_step(batch):
+        xb, yb = batch
+        xb = xb.to(device)
+        yb = yb.to(device)
+        depth_logits = model(xb)
+        loss = sum(criterion(logits, yb) for logits in depth_logits) / max(len(depth_logits), 1)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+        return loss.item()
+
+    start = time.perf_counter()
+    epoch_stats = run_training_steps(train_loader, fine_tune_steps, train_step)
+    fine_tune_time = time.perf_counter() - start
+    fit_time = state["fit_time_sec"] + fine_tune_time
+
+    model.eval()
+    with torch.no_grad():
+        depth_logits = model(xte.to(device))
+        pred = depth_logits[-1].argmax(dim=1).cpu().numpy()
+        layers = [
+            {
+                "depth": depth_idx,
+                "classifier_accuracy": float((logits.argmax(dim=1).cpu().numpy() == bundle.yte).mean()),
+            }
+            for depth_idx, logits in enumerate(depth_logits, start=1)
+        ]
+
+    analysis = None
+    if collect_analysis:
+        def predict_logits(raw_inputs):
+            with torch.no_grad():
+                feats = torch.from_numpy(build_base_mlp_features(bundle, raw_inputs).astype(np.float32)).to(device)
+                return model(feats)[-1].cpu().numpy()
+
+        def encode_repr(raw_inputs):
+            with torch.no_grad():
+                feats = torch.from_numpy(build_base_mlp_features(bundle, raw_inputs).astype(np.float32)).to(device)
+                return model.encode(feats).cpu().numpy().astype(np.float64)
+
+        def encode_layers(raw_inputs):
+            with torch.no_grad():
+                feats = torch.from_numpy(build_base_mlp_features(bundle, raw_inputs).astype(np.float32)).to(device)
+                return [layer.cpu().numpy().astype(np.float64) for layer in model.encode_layers(feats)[0]]
+
+        analysis = build_analysis_payload(
+            bundle,
+            seed,
+            predict_logits,
+            encode_repr,
+            encode_layers,
+            patch_size=8,
+        )
+
+    hidden_param_count = int(sum(p.numel() for p in model.hidden.parameters()))
+    output_heads = list(model.pre_heads.parameters()) + list(model.post_heads.parameters())
+    if model.final_head is not None:
+        output_heads += list(model.final_head.parameters())
+    output_param_count = int(sum(p.numel() for p in output_heads))
+    return {
+        "architecture": "mlp",
+        "model": FINE_TUNE_MODEL_NAME,
+        "dataset": bundle.name,
+        "suite": bundle.suite,
+        "seed": seed,
+        "closed_form_method": method_name,
+        "classifier_accuracy": float((pred == bundle.yte).mean()),
+        "layers": layers,
+        "hidden_param_count": hidden_param_count,
+        "output_param_count": output_param_count,
+        "total_parameter_count": int(sum(p.numel() for p in model.parameters())),
+        "fit_time_sec": fit_time,
+        "closed_form_init_time_sec": state["fit_time_sec"],
+        "fine_tune_time_sec": fine_tune_time,
+        "fine_tune_steps": fine_tune_steps,
+        "fine_tune_effective_epochs": float(fine_tune_steps / max(len(train_loader), 1)),
+        "compute_proxy": used_budget,
+        "compute_unit": "ops_proxy",
+        "epoch_stats": epoch_stats,
+        "config": {**asdict(config), "compute_matched_to": "backprop"},
+        "analysis": analysis,
+    }
+
+
 def run_backprop_mlp(bundle: RawDatasetBundle, config: MLPEvalConfig, seed: int, collect_analysis: bool = False):
     set_seed(seed)
     base_tr, base_te, _, _, _, _ = build_mlp_arrays(bundle, seed)
@@ -1412,7 +1780,7 @@ def run_backprop_mlp(bundle: RawDatasetBundle, config: MLPEvalConfig, seed: int,
     ytr = torch.from_numpy(bundle.ytr).long()
     yte = torch.from_numpy(bundle.yte).long()
 
-    train_loader = DataLoader(TensorDataset(xtr, ytr), batch_size=config.batch_size, shuffle=True, drop_last=False)
+    train_loader = make_train_loader(TensorDataset(xtr, ytr), batch_size=config.batch_size, shuffle=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = SupervisedMLP(base_tr.shape[1], config.width, config.depth, bundle.num_classes).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
@@ -1428,7 +1796,7 @@ def run_backprop_mlp(bundle: RawDatasetBundle, config: MLPEvalConfig, seed: int,
             yb = yb.to(device)
             logits = model(xb)
             loss = criterion(logits, yb)
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
             losses.append(float(loss.item()))
@@ -1514,7 +1882,7 @@ def make_attention_config(tokens, attention_kind, config: TransformerEvalConfig,
     )
 
 
-def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, config: TransformerEvalConfig, seed: int, collect_analysis: bool = False):
+def fit_closed_form_transformer_state(bundle: RawDatasetBundle, attention_kind: str, config: TransformerEvalConfig, seed: int):
     set_seed(seed)
     base_tr, base_te, view1_tr, view2_tr, _, _ = build_transformer_arrays(
         bundle, seed, config.patch_size, include_test_views=False
@@ -1577,6 +1945,36 @@ def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, c
             }
         )
     fit_time = time.perf_counter() - start
+    raw_yhat_te = yhat_te.copy()
+    logit_temperature = 1.0
+    if bundle.task_type == "next_token":
+        logit_temperature = fit_logit_temperature(yhat_tr, bundle.ytr, seed=seed + 1701)
+        yhat_tr = yhat_tr * logit_temperature
+        yhat_te = yhat_te * logit_temperature
+
+    return {
+        "bundle": bundle,
+        "attention_kind": attention_kind,
+        "config": config,
+        "seed": seed,
+        "attn_cfg": attn_cfg,
+        "layer_states": layer_states,
+        "layers": layers,
+        "yhat_te": yhat_te,
+        "raw_yhat_te": raw_yhat_te,
+        "logit_temperature": float(logit_temperature),
+        "hidden_param_count": hidden_param_count,
+        "output_param_count": output_param_count,
+        "fit_time_sec": fit_time,
+    }
+
+
+def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, config: TransformerEvalConfig, seed: int, collect_analysis: bool = False):
+    state = fit_closed_form_transformer_state(bundle, attention_kind, config, seed)
+    attn_cfg = state["attn_cfg"]
+    layer_states = state["layer_states"]
+    metric_summary = scaling_metrics_from_logits(state["yhat_te"], bundle.yte, bundle.task_type)
+    raw_metric_summary = scaling_metrics_from_logits(state["raw_yhat_te"], bundle.yte, bundle.task_type)
 
     analysis = None
     if collect_analysis:
@@ -1604,7 +2002,9 @@ def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, c
                 flat = tokens.reshape(-1, tokens.shape[-1])
                 ffn = cfbt.apply_activation(flat @ state["ffn_model"]["transform_base"], "relu")
                 tokens = tcc.token_layer_norm(tokens + ffn.reshape(tokens.shape))
-            return logits
+            return logits * float(state_ref["logit_temperature"])
+
+        state_ref = state
 
         analysis = build_analysis_payload(
             bundle,
@@ -1622,15 +2022,127 @@ def run_closed_form_transformer(bundle: RawDatasetBundle, attention_kind: str, c
         "suite": bundle.suite,
         "seed": seed,
         "closed_form_method": attention_kind,
-        "classifier_accuracy": evaluate_logits(yhat_te, bundle.yte),
-        "layers": layers,
-        "hidden_param_count": hidden_param_count,
-        "output_param_count": output_param_count,
-        "total_parameter_count": hidden_param_count + output_param_count,
-        "fit_time_sec": fit_time,
+        "classifier_accuracy": metric_summary["classifier_accuracy"],
+        "validation_cross_entropy": metric_summary.get("validation_cross_entropy"),
+        "validation_perplexity": metric_summary.get("validation_perplexity"),
+        "raw_validation_cross_entropy": raw_metric_summary.get("validation_cross_entropy"),
+        "raw_validation_perplexity": raw_metric_summary.get("validation_perplexity"),
+        "logit_temperature": float(state["logit_temperature"]),
+        "scaling_metric_name": metric_summary["scaling_metric_name"],
+        "scaling_metric_label": metric_summary["scaling_metric_label"],
+        "scaling_metric_value": metric_summary["scaling_metric_value"],
+        "scaling_fit_type": metric_summary["scaling_fit_type"],
+        "layers": state["layers"],
+        "hidden_param_count": state["hidden_param_count"],
+        "output_param_count": state["output_param_count"],
+        "total_parameter_count": state["hidden_param_count"] + state["output_param_count"],
+        "fit_time_sec": state["fit_time_sec"],
         "config": asdict(config),
         "analysis": analysis,
     }
+
+
+def token_layer_norm_torch(tokens, eps=1e-5):
+    return F.layer_norm(tokens, (tokens.shape[-1],), eps=eps)
+
+
+class TrainableSpectralSelfAttention(nn.Module):
+    def __init__(self, att_model):
+        super().__init__()
+        self.sigma_inv_sqrt = nn.Parameter(torch.from_numpy(att_model["sigma_inv_sqrt"]).float())
+        self.projection_heads = nn.ParameterList(
+            [nn.Parameter(torch.from_numpy(head).float()) for head in att_model["projection_heads"]]
+        )
+        self.output_map = nn.Parameter(torch.from_numpy(att_model["output_map"]).float())
+        self.mix_scale = nn.Parameter(torch.tensor(float(att_model.get("mix_scale", 0.0)), dtype=torch.float32))
+        self.residual_mode = bool(att_model.get("residual_mode", False))
+        self.center_values = bool(att_model.get("center_values", False))
+        self.whiten_values = bool(att_model.get("whiten_values", False))
+        self.score_mode = att_model.get("score_mode", "raw")
+        self.register_buffer(
+            "score_scales",
+            torch.tensor(
+                [float(head_spec.get("score_scale", 1.0)) for head_spec in att_model["head_layout"]],
+                dtype=torch.float32,
+            ),
+        )
+
+    def forward(self, tokens):
+        if self.score_mode in {None, "raw"}:
+            score_tokens = tokens
+        elif self.score_mode == "token-centered":
+            score_tokens = tokens - tokens.mean(dim=1, keepdim=True)
+        else:
+            raise ValueError(f"Unsupported trainable score_mode: {self.score_mode}")
+
+        whitened_scores = score_tokens @ self.sigma_inv_sqrt
+        values = tokens @ self.sigma_inv_sqrt if self.whiten_values else tokens
+        if self.center_values:
+            values = values - values.mean(dim=1, keepdim=True)
+
+        contexts = []
+        for head_idx, projection in enumerate(self.projection_heads):
+            queries = F.normalize(whitened_scores @ projection, dim=-1, eps=1e-8)
+            keys = F.normalize(whitened_scores @ projection, dim=-1, eps=1e-8)
+            scores = self.score_scales[head_idx] * (
+                torch.matmul(queries, keys.transpose(1, 2)) / math.sqrt(max(int(projection.shape[1]), 1))
+            )
+            weights = torch.softmax(scores, dim=-1)
+            contexts.append(torch.matmul(weights, values))
+        context = torch.cat(contexts, dim=-1)
+        attended = context @ self.output_map
+        if self.residual_mode:
+            return tokens + self.mix_scale * attended
+        alpha = torch.clamp(self.mix_scale, 0.0, 1.0)
+        return alpha * tokens + (1.0 - alpha) * attended
+
+
+class ClosedFormSpectralTransformerLayer(nn.Module):
+    def __init__(self, layer_state):
+        super().__init__()
+        self.attention = TrainableSpectralSelfAttention(layer_state["att_model"])
+        transform = torch.from_numpy(layer_state["ffn_model"]["transform_base"]).float()
+        self.ffn = nn.Linear(transform.shape[0], transform.shape[1], bias=False)
+        self.ffn.weight.data.copy_(transform.T)
+
+    def forward(self, tokens):
+        hidden = token_layer_norm_torch(self.attention(tokens))
+        ffn = torch.relu(self.ffn(hidden))
+        return token_layer_norm_torch(hidden + ffn)
+
+
+class ClosedFormFineTuneTransformer(nn.Module):
+    def __init__(self, token_dim, num_classes, state, task_type="classification"):
+        super().__init__()
+        self.blocks = nn.ModuleList([ClosedFormSpectralTransformerLayer(layer_state) for layer_state in state["layer_states"]])
+        self.output_heads = nn.ModuleList()
+        for layer_state in state["layer_states"]:
+            out_map = torch.from_numpy(layer_state["out_map"]).float()
+            head = nn.Linear(token_dim, num_classes, bias=False)
+            head.weight.data.copy_(out_map.T)
+            self.output_heads.append(head)
+        self.task_type = task_type
+
+    def encode_layers(self, tokens):
+        hidden = tokens
+        collected = [pool_sequence_torch(hidden, self.task_type)]
+        cumulative = None
+        depth_logits = []
+        for block, head in zip(self.blocks, self.output_heads):
+            pooled = pool_sequence_torch(hidden, self.task_type)
+            logits = head(pooled)
+            cumulative = logits if cumulative is None else cumulative + logits
+            depth_logits.append(cumulative)
+            hidden = block(hidden)
+            collected.append(pool_sequence_torch(hidden, self.task_type))
+        return collected, depth_logits
+
+    def encode(self, tokens):
+        return self.encode_layers(tokens)[0][-1]
+
+    def forward(self, tokens):
+        _, depth_logits = self.encode_layers(tokens)
+        return depth_logits
 
 
 class TokenTransformerClassifier(nn.Module):
@@ -1669,10 +2181,7 @@ class TokenTransformerClassifier(nn.Module):
         return depth_logits
 
 
-def run_backprop_transformer(bundle: RawDatasetBundle, config: TransformerEvalConfig, seed: int, collect_analysis: bool = False):
-    set_seed(seed)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+def prepare_transformer_training_context(bundle: RawDatasetBundle, config: TransformerEvalConfig, device):
     if bundle.modality == "image":
         train_raw = torch.from_numpy(bundle.train_raw).float()
         test_raw = torch.from_numpy(bundle.test_raw).float()
@@ -1720,7 +2229,130 @@ def run_backprop_transformer(bundle: RawDatasetBundle, config: TransformerEvalCo
     else:
         raise ValueError(f"Unsupported modality: {bundle.modality}")
 
-    train_loader = DataLoader(train_ds, batch_size=config.batch_size, shuffle=True, drop_last=False)
+    return train_ds, test_raw, token_dim, num_heads, to_tokens
+
+
+def run_closed_form_backprop_finetune_transformer(
+    bundle: RawDatasetBundle, attention_kind: str, config: TransformerEvalConfig, seed: int, collect_analysis: bool = False
+):
+    state = fit_closed_form_transformer_state(bundle, attention_kind, config, seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    train_ds, test_raw, token_dim, _, to_tokens = prepare_transformer_training_context(bundle, config, device)
+    train_loader = make_train_loader(train_ds, batch_size=config.batch_size, shuffle=True)
+    model = ClosedFormFineTuneTransformer(token_dim, bundle.num_classes, state, task_type=bundle.task_type).to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    criterion = nn.CrossEntropyLoss()
+
+    total_budget = estimate_transformer_compute_proxy(bundle, config, "backprop")
+    init_budget = estimate_transformer_compute_proxy(bundle, config, "closed-form", attention_kind)
+    finetune_epoch_budget = estimate_transformer_compute_proxy(bundle, config, FINE_TUNE_MODEL_NAME, attention_kind)
+    fine_tune_steps, used_budget = compute_matched_step_budget(
+        total_budget,
+        init_budget,
+        finetune_epoch_budget,
+        len(train_loader),
+    )
+
+    def train_step(batch):
+        xb, yb = batch
+        tokens = to_tokens(xb, augment=True)
+        yb = yb.to(device)
+        depth_logits = model(tokens)
+        loss = sum(criterion(logits, yb) for logits in depth_logits) / max(len(depth_logits), 1)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+        return loss.item()
+
+    start = time.perf_counter()
+    epoch_stats = run_training_steps(train_loader, fine_tune_steps, train_step)
+    fine_tune_time = time.perf_counter() - start
+    fit_time = state["fit_time_sec"] + fine_tune_time
+
+    model.eval()
+    with torch.no_grad():
+        tokens_te = to_tokens(test_raw, augment=False)
+        depth_logits = model(tokens_te)
+        final_logits = depth_logits[-1]
+        final_logits_np = final_logits.cpu().numpy()
+        pred = final_logits.argmax(dim=1).cpu().numpy()
+        layers = [
+            {
+                "depth": depth_idx,
+                "classifier_accuracy": float((logits.argmax(dim=1).cpu().numpy() == bundle.yte).mean()),
+            }
+            for depth_idx, logits in enumerate(depth_logits, start=1)
+        ]
+    metric_summary = scaling_metrics_from_logits(final_logits_np, bundle.yte, bundle.task_type)
+
+    analysis = None
+    if collect_analysis:
+        def raw_to_tokens(raw_inputs):
+            if bundle.modality == "image":
+                tensor = torch.from_numpy(raw_inputs).float().to(device)
+            elif bundle.modality == "text":
+                tensor = torch.from_numpy(raw_inputs).long().to(device)
+            else:
+                tensor = torch.from_numpy(raw_inputs).float().to(device)
+            return to_tokens(tensor, augment=False)
+
+        def predict_logits(raw_inputs):
+            with torch.no_grad():
+                return model(raw_to_tokens(raw_inputs))[-1].cpu().numpy()
+
+        def encode_repr(raw_inputs):
+            with torch.no_grad():
+                return model.encode(raw_to_tokens(raw_inputs)).cpu().numpy().astype(np.float64)
+
+        def encode_layers(raw_inputs):
+            with torch.no_grad():
+                return [layer.cpu().numpy().astype(np.float64) for layer in model.encode_layers(raw_to_tokens(raw_inputs))[0]]
+
+        analysis = build_analysis_payload(
+            bundle,
+            seed,
+            predict_logits,
+            encode_repr,
+            encode_layers,
+            patch_size=max(1, config.patch_size),
+        )
+
+    return {
+        "architecture": "transformer",
+        "model": FINE_TUNE_MODEL_NAME,
+        "dataset": bundle.name,
+        "suite": bundle.suite,
+        "seed": seed,
+        "closed_form_method": attention_kind,
+        "classifier_accuracy": metric_summary["classifier_accuracy"],
+        "validation_cross_entropy": metric_summary.get("validation_cross_entropy"),
+        "validation_perplexity": metric_summary.get("validation_perplexity"),
+        "scaling_metric_name": metric_summary["scaling_metric_name"],
+        "scaling_metric_label": metric_summary["scaling_metric_label"],
+        "scaling_metric_value": metric_summary["scaling_metric_value"],
+        "scaling_fit_type": metric_summary["scaling_fit_type"],
+        "layers": layers,
+        "hidden_param_count": int(sum(p.numel() for p in model.blocks.parameters())),
+        "output_param_count": int(sum(p.numel() for p in model.output_heads.parameters())),
+        "total_parameter_count": int(sum(p.numel() for p in model.parameters())),
+        "fit_time_sec": fit_time,
+        "closed_form_init_time_sec": state["fit_time_sec"],
+        "fine_tune_time_sec": fine_tune_time,
+        "fine_tune_steps": fine_tune_steps,
+        "fine_tune_effective_epochs": float(fine_tune_steps / max(len(train_loader), 1)),
+        "compute_proxy": used_budget,
+        "compute_unit": "ops_proxy",
+        "epoch_stats": epoch_stats,
+        "config": {**asdict(config), "compute_matched_to": "backprop"},
+        "analysis": analysis,
+    }
+
+
+def run_backprop_transformer(bundle: RawDatasetBundle, config: TransformerEvalConfig, seed: int, collect_analysis: bool = False):
+    set_seed(seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    train_ds, test_raw, token_dim, num_heads, to_tokens = prepare_transformer_training_context(bundle, config, device)
+    train_loader = make_train_loader(train_ds, batch_size=config.batch_size, shuffle=True)
     model = TokenTransformerClassifier(token_dim, num_heads, config.depth, bundle.num_classes, config.mlp_ratio, task_type=bundle.task_type).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     criterion = nn.CrossEntropyLoss()
@@ -1735,7 +2367,7 @@ def run_backprop_transformer(bundle: RawDatasetBundle, config: TransformerEvalCo
             yb = yb.to(device)
             depth_logits = model(tokens)
             loss = sum(criterion(logits, yb) for logits in depth_logits) / len(depth_logits)
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             loss.backward()
             optimizer.step()
             losses.append(float(loss.item()))
@@ -1746,7 +2378,9 @@ def run_backprop_transformer(bundle: RawDatasetBundle, config: TransformerEvalCo
     with torch.no_grad():
         tokens_te = to_tokens(test_raw, augment=False)
         depth_logits = model(tokens_te)
-        pred = depth_logits[-1].argmax(dim=1).cpu().numpy()
+        final_logits = depth_logits[-1]
+        final_logits_np = final_logits.cpu().numpy()
+        pred = final_logits.argmax(dim=1).cpu().numpy()
         layers = []
         for depth_idx, logits in enumerate(depth_logits, start=1):
             layers.append(
@@ -1755,23 +2389,18 @@ def run_backprop_transformer(bundle: RawDatasetBundle, config: TransformerEvalCo
                     "classifier_accuracy": float((logits.argmax(dim=1).cpu().numpy() == bundle.yte).mean()),
                 }
             )
+    metric_summary = scaling_metrics_from_logits(final_logits_np, bundle.yte, bundle.task_type)
 
     analysis = None
     if collect_analysis:
-        if bundle.modality == "image":
-            def raw_to_tokens(raw_inputs):
+        def raw_to_tokens(raw_inputs):
+            if bundle.modality == "image":
                 tensor = torch.from_numpy(raw_inputs).float().to(device)
-                return image_tokens_from_torch(tensor, mean_image, config.patch_size)
-
-        elif bundle.modality == "text":
-            def raw_to_tokens(raw_inputs):
+            elif bundle.modality == "text":
                 tensor = torch.from_numpy(raw_inputs).long().to(device)
-                return text_tokens_from_torch(tensor, embedding, pos)
-
-        else:
-            def raw_to_tokens(raw_inputs):
+            else:
                 tensor = torch.from_numpy(raw_inputs).float().to(device)
-                return tabular_tokens_from_torch(tensor, embedding, pos)
+            return to_tokens(tensor, augment=False)
 
         def predict_logits(raw_inputs):
             with torch.no_grad():
@@ -1806,7 +2435,13 @@ def run_backprop_transformer(bundle: RawDatasetBundle, config: TransformerEvalCo
         "dataset": bundle.name,
         "suite": bundle.suite,
         "seed": seed,
-        "classifier_accuracy": float((pred == bundle.yte).mean()),
+        "classifier_accuracy": metric_summary["classifier_accuracy"],
+        "validation_cross_entropy": metric_summary.get("validation_cross_entropy"),
+        "validation_perplexity": metric_summary.get("validation_perplexity"),
+        "scaling_metric_name": metric_summary["scaling_metric_name"],
+        "scaling_metric_label": metric_summary["scaling_metric_label"],
+        "scaling_metric_value": metric_summary["scaling_metric_value"],
+        "scaling_fit_type": metric_summary["scaling_fit_type"],
         "layers": layers,
         "hidden_param_count": int(sum(p.numel() for p in model.blocks.parameters())),
         "output_param_count": int(sum(p.numel() for p in model.output_heads.parameters())),
@@ -2158,6 +2793,30 @@ def fit_power_law(x_values, y_values):
     }
 
 
+def fit_log_linear(x_values, y_values):
+    xs = np.asarray(x_values, dtype=np.float64)
+    ys = np.asarray(y_values, dtype=np.float64)
+    mask = (xs > 0.0) & np.isfinite(ys)
+    xs = xs[mask]
+    ys = ys[mask]
+    if xs.size < 3:
+        return None
+    log_x = np.log(xs)
+    slope, intercept = np.polyfit(log_x, ys, 1)
+    pred = slope * log_x + intercept
+    ss_res = np.sum((ys - pred) ** 2)
+    ss_tot = np.sum((ys - ys.mean()) ** 2)
+    r2 = 1.0 - ss_res / max(ss_tot, 1e-12)
+    return {
+        "slope": float(slope),
+        "intercept": float(intercept),
+        "r2": float(r2),
+        "x_min": float(xs.min()),
+        "x_max": float(xs.max()),
+        "range_ratio": float(xs.max() / xs.min()),
+    }
+
+
 def estimate_transformer_compute_proxy(
     bundle: RawDatasetBundle,
     config: TransformerEvalConfig,
@@ -2191,6 +2850,19 @@ def estimate_transformer_compute_proxy(
             + 2.0 * num_tokens * token_dim * hidden_ffn
         )
         return float(config.epochs * train_count * config.depth * (per_layer_cost + token_dim * bundle.num_classes))
+
+    if model_kind == FINE_TUNE_MODEL_NAME:
+        head_count = analytic_heads
+        per_layer_cost = (
+            num_tokens * token_dim * token_dim
+            + num_tokens * token_dim * rank
+            + num_tokens * num_tokens * rank
+            + head_count * num_tokens * num_tokens * token_dim
+            + num_tokens * head_count * token_dim * token_dim
+            + num_tokens * token_dim * token_dim
+            + token_dim * bundle.num_classes
+        )
+        return float(train_count * config.depth * per_layer_cost)
 
     if implementation not in {"current", "legacy-search"}:
         raise ValueError(f"Unknown transformer compute implementation: {implementation}")
@@ -2240,10 +2912,13 @@ def summarize_scaling_rows(rows):
     aggregated = []
     for (architecture, model, axis, scale_value), items in sorted(grouped.items()):
         accs = [item["classifier_accuracy"] for item in items]
-        errs = [1.0 - item["classifier_accuracy"] for item in items]
         params = [item["total_parameter_count"] for item in items]
         times = [item["fit_time_sec"] for item in items]
         computes = [item["compute_proxy"] for item in items]
+        metric_name = items[0].get("scaling_metric_name", "error_rate")
+        metric_label = items[0].get("scaling_metric_label", "Error rate")
+        fit_type = items[0].get("scaling_fit_type", "power-law")
+        metric_vals = [float(item.get("scaling_metric_value", 1.0 - item["classifier_accuracy"])) for item in items]
         aggregated.append(
             {
                 "architecture": architecture,
@@ -2252,7 +2927,11 @@ def summarize_scaling_rows(rows):
                 "scale_value": scale_value,
                 "mean_accuracy": float(np.mean(accs)),
                 "std_accuracy": float(np.std(accs, ddof=0)),
-                "mean_error": float(np.mean(errs)),
+                "mean_scaling_metric": float(np.mean(metric_vals)),
+                "std_scaling_metric": float(np.std(metric_vals, ddof=0)),
+                "scaling_metric_name": metric_name,
+                "scaling_metric_label": metric_label,
+                "scaling_fit_type": fit_type,
                 "mean_parameter_count": float(np.mean(params)),
                 "mean_fit_time_sec": float(np.mean(times)),
                 "mean_compute_proxy": float(np.mean(computes)),
@@ -2270,12 +2949,15 @@ def summarize_scaling_rows(rows):
                     x_vals = [row["scale_value"] for row in rows_axis]
                 elif axis == "parameters":
                     x_vals = [row["mean_parameter_count"] for row in rows_axis]
-                elif axis == "compute":
+                elif axis in {"compute", CONTEXT_LENGTH_AXIS_NAME}:
                     x_vals = [row["mean_compute_proxy"] for row in rows_axis]
                 else:
                     continue
-                y_vals = [row["mean_error"] for row in rows_axis]
-                fit = fit_power_law(x_vals, y_vals)
+                metric_name = rows_axis[0].get("scaling_metric_name", "error_rate")
+                metric_label = rows_axis[0].get("scaling_metric_label", "Error rate")
+                fit_type = rows_axis[0].get("scaling_fit_type", "power-law")
+                y_vals = [row["mean_scaling_metric"] for row in rows_axis]
+                fit = fit_log_linear(x_vals, y_vals) if fit_type == "log-linear" else fit_power_law(x_vals, y_vals)
                 if fit is None:
                     continue
                 fits.append(
@@ -2283,6 +2965,9 @@ def summarize_scaling_rows(rows):
                         "architecture": architecture,
                         "model": model,
                         "axis": axis,
+                        "metric_name": metric_name,
+                        "metric_label": metric_label,
+                        "fit_type": fit_type,
                         **fit,
                     }
                 )
@@ -2328,7 +3013,10 @@ def plot_scaling_results(aggregated_rows, fit_rows, output_path):
     plt = maybe_import_pyplot()
     if plt is None:
         return False
-    axes_order = ["data", "parameters", "compute"]
+    present_axes = {row["axis"] for row in aggregated_rows}
+    axes_order = [axis_name for axis_name in [*SCALING_AXES, CONTEXT_LENGTH_AXIS_NAME] if axis_name in present_axes]
+    if not axes_order:
+        axes_order = sorted(present_axes)
     architectures = sorted({row["architecture"] for row in aggregated_rows})
     fig, axs = plt.subplots(len(architectures), len(axes_order), figsize=(12, 3.8 * max(len(architectures), 1)))
     axs = np.atleast_2d(axs)
@@ -2349,22 +3037,25 @@ def plot_scaling_results(aggregated_rows, fit_rows, output_path):
                     x_vals = [row["mean_parameter_count"] for row in rows_model]
                 else:
                     x_vals = [row["mean_compute_proxy"] for row in rows_model]
-                y_vals = [row["mean_error"] for row in rows_model]
+                y_vals = [row["mean_scaling_metric"] for row in rows_model]
                 ax.plot(x_vals, y_vals, marker="o", label=model)
+            metric_label = subset[0].get("scaling_metric_label", "Error rate")
+            fit_type = subset[0].get("scaling_fit_type", "power-law")
             for fit_idx, fit in enumerate(fit_subset):
                 ax.text(
                     0.02,
                     0.95 - 0.1 * fit_idx,
-                    f"{fit['model']}: slope={fit['slope']:.2f}, R2={fit['r2']:.2f}",
+                    f"{fit['model']}: slope={fit['slope']:.3f}, R2={fit['r2']:.2f}",
                     transform=ax.transAxes,
                     va="top",
                     fontsize=8,
                 )
             ax.set_xscale("log")
-            ax.set_yscale("log")
+            if fit_type == "power-law":
+                ax.set_yscale("log")
             ax.set_title(f"{architecture} {axis_name}")
-            ax.set_xlabel("compute proxy" if axis_name == "compute" else axis_name)
-            ax.set_ylabel("Error")
+            ax.set_xlabel("compute proxy" if axis_name in {"compute", CONTEXT_LENGTH_AXIS_NAME} else axis_name)
+            ax.set_ylabel(metric_label)
             ax.legend(frameon=False)
 
     fig.tight_layout()
@@ -2582,7 +3273,7 @@ def scaling_specs_for_axis(dataset_name, axis_name, seeds):
                 )
         return SCALING_DATA_VALUES, specs
 
-    if axis_name in {"parameters", "compute"}:
+    if axis_name in {"parameters", "compute", CONTEXT_LENGTH_AXIS_NAME}:
         for seed in seeds:
             specs.append(
                 DatasetSpec(
@@ -2614,7 +3305,7 @@ def scaling_specs_for_axis(dataset_name, axis_name, seeds):
 def run_scaling_suite(dataset_name, transformer_winner, transformer_config):
     rows = []
 
-    for axis_name in ["data", "parameters", "compute"]:
+    for axis_name in SCALING_AXES:
         scale_values, dataset_specs = scaling_specs_for_axis(dataset_name, axis_name, SCALING_SEEDS)
         if axis_name == "data":
             for spec in dataset_specs:
@@ -2631,6 +3322,10 @@ def run_scaling_suite(dataset_name, transformer_winner, transformer_config):
                 tr_bp["compute_proxy"] = estimate_transformer_compute_proxy(bundle, transformer_config, "backprop")
                 tr_bp["compute_unit"] = "ops_proxy"
                 rows.append(tr_bp)
+                tr_ft = run_closed_form_backprop_finetune_transformer(bundle, transformer_winner, transformer_config, spec.seed)
+                tr_ft["axis"] = axis_name
+                tr_ft["scale_value"] = spec.n_train
+                rows.append(tr_ft)
 
         elif axis_name == "parameters":
             for spec in dataset_specs:
@@ -2650,25 +3345,10 @@ def run_scaling_suite(dataset_name, transformer_winner, transformer_config):
                     tr_bp["compute_proxy"] = estimate_transformer_compute_proxy(bundle, tr_cfg, "backprop")
                     tr_bp["compute_unit"] = "ops_proxy"
                     rows.append(tr_bp)
-
-        elif axis_name == "compute":
-            for spec in dataset_specs:
-                for context_len in scale_values:
-                    spec_ctx = replace(spec, text_seq_len=context_len)
-                    bundle = load_dataset_bundle(spec_ctx)
-                    tr_cfg = TransformerEvalConfig(**{**asdict(transformer_config)})
-                    tr_row = run_closed_form_transformer(bundle, transformer_winner, tr_cfg, spec.seed)
-                    tr_row["axis"] = axis_name
-                    tr_row["scale_value"] = context_len
-                    tr_row["compute_proxy"] = estimate_transformer_compute_proxy(bundle, tr_cfg, "closed-form", transformer_winner)
-                    tr_row["compute_unit"] = "ops_proxy"
-                    rows.append(tr_row)
-                    tr_bp = run_backprop_transformer(bundle, tr_cfg, spec.seed)
-                    tr_bp["axis"] = axis_name
-                    tr_bp["scale_value"] = context_len
-                    tr_bp["compute_proxy"] = estimate_transformer_compute_proxy(bundle, tr_cfg, "backprop")
-                    tr_bp["compute_unit"] = "ops_proxy"
-                    rows.append(tr_bp)
+                    tr_ft = run_closed_form_backprop_finetune_transformer(bundle, transformer_winner, tr_cfg, spec.seed)
+                    tr_ft["axis"] = axis_name
+                    tr_ft["scale_value"] = embed_dim
+                    rows.append(tr_ft)
 
     return rows
 
@@ -2830,6 +3510,7 @@ def main():
             "main_seeds": MAIN_SEEDS,
             "scaling_seeds": SCALING_SEEDS,
             "scaling_dataset": DEFAULT_SCALING_DATASET,
+            "scaling_axes": SCALING_AXES,
             "run_selection": args.run_selection,
             "skip_main": args.skip_main,
             "skip_scaling": args.skip_scaling,
@@ -2900,7 +3581,8 @@ def main():
     for fit in scaling_fits:
         print(
             f"scaling {fit['architecture']:11s} {fit['model']:10s} {fit['axis']:10s} "
-            f"slope={fit['slope']:.3f} R2={fit['r2']:.3f} range={fit['range_ratio']:.1f}x"
+            f"{fit['metric_name']} {fit['fit_type']} slope={fit['slope']:.3f} "
+            f"R2={fit['r2']:.3f} range={fit['range_ratio']:.1f}x"
         )
 
 

@@ -2,3 +2,9 @@
 /.venv
 /data
 /__pycache__
+/logs/
+/results/logs/
+/results/json/debug/
+/results/json/**/*.json
+/results/json/**/*.jsonl
+*.log
