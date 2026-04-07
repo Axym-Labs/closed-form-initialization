@@ -1,22 +1,27 @@
 # vicreg_superlinear
 
-## Real-world initialization benchmark
+## Introduction
 
-This repository now evaluates the method for parameter intialization, not as a fully closed-form end-to-end learner.
+This repository studies **closed-form neural initialization**, with the main emphasis on transformers. Here, “closed-form” means that the encoder is built analytically from paired training views using covariance/eigendecomposition and ridge-style solves, instead of being obtained by end-to-end gradient descent. For transformers, this yields a spectral self-attention block plus analytically fitted feed-forward maps; an MLP variant is included as a secondary baseline. The key question is whether this analytic encoder is useful as an initialization for supervised learning.
+
+The benchmark compares three model classes: ordinary backprop from scratch, `closed-form init + compute-matched fine-tune`, and `closed-form init + CE head only`. Evaluation covers four scenarios spanning tabular, vision, and NLP workloads: `covtype / MLP`, `cifar100 / transformer`, `qnli / transformer`, and `wikitext2 next-token / transformer`, with the transformer results being the main focus. For each scenario, we measure matched-budget final performance, anytime behavior against FLOPs proxy and wall-clock, compute-to-target, low-data behavior, OOD robustness, seed sensitivity, transfer/amortization, and Pareto frontiers over compute and time.
+
+The main result is negative for the intended method: `closed-form init + compute-matched fine-tune` does not beat backprop at full budget on any of the four main scenarios. The strongest positive signal is narrower: `closed-form init + CE head only` is competitive on `qnli` and in some low-data regimes, and can look attractive on the compute frontier, but these gains do not currently translate into better wall-clock. The main practical bottleneck remains systems efficiency, especially for transformers.
+
+## Benchmark setup
 
 The main benchmark runner is [init_finetune_realworld_eval.py](/c:/Users/DavWi/Main/Projekte/vicreg_superlinear/init_finetune_realworld_eval.py). It compares:
 
-- `backprop`
-- `closed-form init + compute-matched fine-tune`
-- `closed-form init + CE head only`
+- `backprop`: ordinary training from scratch
+- `closed-form init + compute-matched fine-tune`: build the encoder analytically from paired views, then fine-tune with the same total compute budget as backprop
+- `closed-form init + CE head only`: build the encoder analytically, freeze it, and train only a cross-entropy readout
 
-### What was tested
+Benchmark scope:
 
-Scenarios: `covtype / MLP`, `cifar100 / transformer`, `qnli / transformer`, `wikitext2 next-token / transformer`.
-
-Per scenario: anytime curves vs FLOPs proxy and wall-clock, matched-budget finals, compute-to-target, low-data slices, OOD, seed sensitivity, transfer/amortization, and Pareto frontiers.
-
-Seeds: `7`, `11`, `19`.
+- Scenarios: `covtype / MLP`, `cifar100 / transformer`, `qnli / transformer`, `wikitext2 next-token / transformer`
+- Regimes: full-budget comparison, low-data slices, and shared-init transfer/amortization
+- Analytics: anytime curves vs FLOPs proxy and wall-clock, compute-to-target, OOD robustness, seed sensitivity, and Pareto frontiers
+- Seeds: `7`, `11`, `19`
 
 ## Results
 
