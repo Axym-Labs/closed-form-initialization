@@ -87,6 +87,8 @@ The two key figures used in this README are tracked in `docs/figures/`; full loc
 
 ![Anytime curves](docs/figures/init_finetune_realworld_eval_anytime.png)
 
+For the mathematical details of the MLP baseline, see [Closed-Form MLP Derivation](docs/closed_form_mlp_derivation.md).
+
 ## Conclusion
 
 Using the original worth-it criteria:
