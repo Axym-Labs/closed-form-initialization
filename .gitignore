@@ -2,9 +2,27 @@
 /.venv
 /data
 /__pycache__
+__pycache__/
+*.py[cod]
+/.codex/
+/.codex-autoresearch.md
 /logs/
 /results/logs/
 /results/json/
 /results/plots/
 /results/*.pdf
 *.log
+
+# Local ML experiment outputs and checkpoints. Keep lightweight specs,
+# progress notes, and hand-written analysis docs tracked explicitly.
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.npy
+*.npz
+*.pkl
+*.pickle
+docs/cf_mlp_representation_learning/artifacts_*/
+docs/cf_mlp_representation_learning/models*/
+docs/cf_mlp_scalability_tests/artifacts*/
