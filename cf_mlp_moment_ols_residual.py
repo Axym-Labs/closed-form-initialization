@@ -594,6 +594,7 @@ def branch_post_transform_features(args, current_train, branch_train, branch_tes
         "branch_post_invariance": float(args.branch_post_invariance),
         "branch_post_mean_gain": float("nan"),
         "branch_post_min_gain": float("nan"),
+        "branch_post_gain_floor": float(args.branch_post_gain_floor),
         "branch_post_max_delta": float("nan"),
         "branch_post_reach_score_mean": float("nan"),
         "branch_post_reach_score_max": float("nan"),
@@ -608,6 +609,7 @@ def branch_post_transform_features(args, current_train, branch_train, branch_tes
             branch_train[2],
             branch_train[1].shape[1],
             invariance_strength=args.branch_post_invariance,
+            gain_floor=args.branch_post_gain_floor,
         )
         transform = fitted["transform"]
         transformed_train = [arr @ transform for arr in branch_train]
@@ -620,6 +622,7 @@ def branch_post_transform_features(args, current_train, branch_train, branch_tes
             {
                 "branch_post_mean_gain": fitted["mean_gain"],
                 "branch_post_min_gain": fitted["min_gain"],
+                "branch_post_gain_floor": fitted.get("gain_floor", float(args.branch_post_gain_floor)),
                 "branch_post_max_delta": fitted["max_whitened_delta"],
             }
         )
@@ -641,6 +644,7 @@ def branch_post_transform_features(args, current_train, branch_train, branch_tes
             {
                 "branch_post_mean_gain": fitted["mean_gain"],
                 "branch_post_min_gain": fitted["min_gain"],
+                "branch_post_gain_floor": fitted.get("gain_floor", 0.0),
                 "branch_post_max_delta": fitted["max_whitened_delta"],
             }
         )
@@ -2194,6 +2198,7 @@ def run_variant(args, point, tensors, variant, device):
             "branch_post_invariance": branch_post_metrics["branch_post_invariance"],
             "branch_post_mean_gain": branch_post_metrics["branch_post_mean_gain"],
             "branch_post_min_gain": branch_post_metrics["branch_post_min_gain"],
+            "branch_post_gain_floor": branch_post_metrics["branch_post_gain_floor"],
             "branch_post_max_delta": branch_post_metrics["branch_post_max_delta"],
             "branch_post_reach_score_mean": branch_post_metrics["branch_post_reach_score_mean"],
             "branch_post_reach_score_max": branch_post_metrics["branch_post_reach_score_max"],
@@ -2555,6 +2560,7 @@ def summarize(mech_rows, readout_summaries):
                 ),
                 "mean_branch_post_mean_gain": safe_nanmean([row["branch_post_mean_gain"] for row in rows]),
                 "mean_branch_post_min_gain": safe_nanmean([row["branch_post_min_gain"] for row in rows]),
+                "mean_branch_post_gain_floor": safe_nanmean([row["branch_post_gain_floor"] for row in rows]),
                 "mean_branch_post_max_delta": safe_nanmean([row["branch_post_max_delta"] for row in rows]),
                 "mean_branch_post_reach_score_mean": safe_nanmean(
                     [row["branch_post_reach_score_mean"] for row in rows]
@@ -2824,6 +2830,7 @@ def main():
     parser.add_argument("--branch-shared-power", type=float, default=0.0)
     parser.add_argument("--branch-post-transform", choices=["none", "cf_shrink", "whiten", "grad_reach"], default="none")
     parser.add_argument("--branch-post-invariance", type=float, default=1.0)
+    parser.add_argument("--branch-post-gain-floor", type=float, default=0.0)
     parser.add_argument("--branch-post-dim", type=int, default=0)
     parser.add_argument("--branch-post-cov-ridge", type=float, default=1e-4)
     parser.add_argument("--branch-mode-balance-power", type=float, default=0.0)

@@ -49,7 +49,7 @@ def lambda_from_invariance_strength(invariance_strength):
     return 1.0 / max(float(invariance_strength), 1e-12)
 
 
-def fit_cf_transform_torch(view1, view2, width, lambda_reg=None, invariance_strength=None):
+def fit_cf_transform_torch(view1, view2, width, lambda_reg=None, invariance_strength=None, gain_floor=0.0):
     if invariance_strength is not None:
         if lambda_reg is not None:
             raise ValueError("Pass either lambda_reg or invariance_strength, not both")
@@ -77,6 +77,9 @@ def fit_cf_transform_torch(view1, view2, width, lambda_reg=None, invariance_stre
     m_matrix = 0.5 * (m_matrix + m_matrix.T)
     eigvals, eigvecs = torch.linalg.eigh(m_matrix)
     gains = lambda_reg / (torch.clamp(eigvals, min=0.0) + lambda_reg)
+    if float(gain_floor) > 0.0:
+        floor = torch.as_tensor(float(gain_floor), dtype=gains.dtype, device=gains.device)
+        gains = floor + (1.0 - floor) * gains
 
     if width >= dim:
         sigma_sqrt = (evecs_sigma * torch.sqrt(evals_sigma).unsqueeze(0)) @ evecs_sigma.T
@@ -93,6 +96,7 @@ def fit_cf_transform_torch(view1, view2, width, lambda_reg=None, invariance_stre
         "transform": transform,
         "lambda_reg": float(lambda_reg),
         "invariance_strength": float(1.0 / max(float(lambda_reg), 1e-12)),
+        "gain_floor": float(gain_floor),
         "max_whitened_delta": float(eigvals.max().detach().cpu().item()),
         "min_whitened_delta": float(eigvals.min().detach().cpu().item()),
         "mean_gain": float(kept_gains.mean().detach().cpu().item()),

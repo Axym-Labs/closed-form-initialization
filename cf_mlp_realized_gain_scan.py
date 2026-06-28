@@ -323,6 +323,7 @@ def ensure_solver_defaults(args):
         "branch_shared_power": 0.0,
         "branch_post_transform": "none",
         "branch_post_invariance": 1.0,
+        "branch_post_gain_floor": 0.0,
         "branch_post_dim": 0,
         "branch_post_cov_ridge": 1e-4,
         "branch_mode_balance_power": 0.0,

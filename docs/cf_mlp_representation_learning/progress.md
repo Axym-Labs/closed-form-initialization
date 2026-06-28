@@ -1,5 +1,34 @@
 # Progress
 
+- EXPERIMENT/ANALYSIS (2026-06-28 10:42 CEST): Implemented and tested the
+  natural branch-metric continuum suggested by the previous failure: a paired
+  CF gain floor in the whitened paired-difference basis,
+  \(g'_j=g_{\min}+(1-g_{\min})g_j\). This changes the branch features before
+  the residual moment-OLS solve, so it changes the solved residual direction
+  rather than filtering a downstream representation. On the coherent
+  LayerNorm residual setup (CIFAR100/SimCLR, width 512, random nonlinear
+  branch, K=4 moment batches, exact BT-quadratic scaling,
+  LayerNorm-kinetic term), floor `0.10` and `0.15` are feasible at d12 while
+  floor `0.25` is fully vetoed. d12 floor `0.15` is the best LayerNorm
+  residual representation result so far: train/test BT `0.3804/0.4014`,
+  improve fraction `1.0`, final rank `18.04`, last/all-PCA
+  `0.1722/0.1930`, best layer `0.1746@2`. This beats the no-floor kinetic
+  variant (`0.3978` test BT, rank `15.50`, all-PCA `0.1830`) and nearly
+  reaches the old feature-normalized adaptive old-span d12 all-PCA (`0.1934`),
+  though with worse held-out BT. At d24, the feasible breadth shifts because
+  the per-layer step is smaller: floor `0.25` is accepted at every layer and
+  improves the no-floor d24 LayerNorm flow from train/test BT
+  `0.3707/0.3845`, rank `14.15`, last/all-PCA `0.1632/0.1824` to
+  `0.3548/0.3731`, rank `17.02`, last/all-PCA `0.1674/0.1876`. This is a
+  real branch-metric repair but not the full solution: old feature-normalized
+  adaptive old-span d24 is still stronger (`0.3173/0.3334`, rank `22.25`,
+  all-PCA `0.1952`, last `0.1762`), and BP-BT remains much broader. Current
+  next mechanism: choose the gain floor per layer as the largest breadth that
+  still has negative full-train first-order BT change, i.e.
+  \(g_{\min,l}=\max g:\langle\nabla_C L_{\rm BT},\Delta C_l(g)\rangle<0\).
+  Detailed note:
+  `docs/cf_mlp_representation_learning/artifacts/gain_floor_branch_metric_note.md`.
+
 - EXPERIMENT/ANALYSIS (2026-06-28 10:05 CEST): Replaced the loose
   branch-scan direction with a mechanism-first residual trust-region test. I
   added a `layernorm_sample` operator to the moment-OLS solver and a
