@@ -1,5 +1,77 @@
 # Progress
 
+- EXPERIMENT/ANALYSIS (2026-06-28 09:10 CEST): Continued the
+  LayerNorm residual-flow branch-dictionary work and found the first coherent
+  LayerNorm CF-BT trajectory. The failed `grad_reach` branch clarified the
+  issue: on its fit batch the first-order BT term was descending, but on the
+  full train distribution the realized finite candidate had positive
+  first-order BT change, so the step was not globally descending. I added an
+  analytic BT-quadratic scale based on the exact correlation-space quadratic
+  \(L(C+\alpha D)-L(C)=\alpha\langle G,D\rangle+\alpha^2Q(D)\), choosing
+  \(\alpha=-\langle G,D\rangle/(2Q(D))\) clipped to `[0,1]`, or zero when the
+  realized full-train first-order term is not descending. This correctly
+  vetoed the naive `grad_reach` branch at d12, even with K=4 moment batches:
+  its full-train first-order term stayed positive and the scale chose zero.
+  The structurally plausible branch, `random_orth -> activation ->
+  post-activation CF transform`, required K=4 independent moment batches; with
+  one 1024 batch the quadratic guard also vetoed it. With K=4 plus the
+  quadratic guard it produced the first real LayerNorm residual CF-BT flow:
+  d12 train/test BT `0.3846/0.4002`, improvement fraction `1.0`,
+  actual-predicted correlation-motion cosine `0.864`, rank `15.6`, all-PCA
+  `0.1814`; d24 train/test BT `0.3707/0.3845`, improvement fraction `1.0`,
+  actual-predicted cosine `0.971`, rank `14.2`, all-PCA `0.1824`. This is a
+  genuine mechanism-level repair relative to the earlier LayerNorm attempts:
+  residual LayerNorm, nonlinear lift, post-activation paired CF transform,
+  multi-batch moment solve, and exact BT-curvature scaling now compose in BT
+  space. It is not yet the desired representation solution: compared with old
+  feature-normalized adaptive old-span (`d24 0.3173/0.3334`, rank `22.2`,
+  all-PCA `0.1952`), the LayerNorm flow is lower-rank and worse for readout.
+  The new exact failure is therefore mode allocation under a correct residual
+  BT flow, not failure to obtain a monotone flow. Detailed note:
+  `docs/cf_mlp_representation_learning/artifacts/layernorm_branch_dictionary_failure_note.md`.
+
+- EXPERIMENT/ANALYSIS (2026-06-28 08:44 CEST): Replaced the
+  branch-filter scan with a derivation-first residual-flow test. I added a
+  `--residual-normalization layernorm` mode to `cf_mlp_moment_ols_residual.py`
+  whose moment operator composes the row-wise LayerNorm tangent with the
+  existing batch-standardization tangent for BT. This makes the CF residual
+  layer live on the same normalization manifold as residual BP-BT:
+  `H <- LayerNorm(H + phi(H A) B)`. I also added a post-retraction trust
+  region (`--max-postnorm-update-ratio`) so the step size is measured as
+  actual LayerNorm-manifold displacement, not raw branch norm. This was a real
+  mechanism-level correction, but it did not solve the problem. On full
+  CIFAR100/SimCLR, width 512, branch width 512, batch 1024, old solver fidelity
+  (`ols_ridge=1e-5`, `cg_iters=120`), LayerNorm + CF-shrink at depths
+  6/12/24 gave train/test BT `0.6221/0.6427`, `0.6655/0.7061`,
+  `0.4848/0.5106`; improvement fractions `0.17/0.17/0.71`; ranks
+  `78.0/96.5/46.3`; all-PCA `0.1888/0.1902/0.1922`. It produced BP-like
+  update geometry (post-LN update/input cosine around `-0.37` at d12 and rank
+  much higher than feature-normalized CF), but the BT trajectory was not
+  monotone and was much worse than old feature-normalized old-span adaptive
+  (`d12 0.3418/0.3603`, rank `23.7`, all-PCA `0.1934`). A branch-range
+  diagnostic then separated the failure: LayerNorm + full random nonlinear
+  features had much higher linearized target reach (`target cos 0.639`) but
+  destroyed invariance/readout (`d12 0.9032/0.9361`, all-PCA `0.1598`), while
+  CF-shrink was paired/stable but a weak velocity basis. The first structural
+  fix, `random_orth -> activation -> post-activation CF transform -> moment
+  OLS`, partially rescued random features (`d12 0.5910/0.6301`, improve frac
+  `0.75`, all-PCA `0.1902`) but still did not beat the old baseline. Current
+  conclusion: the exact remaining failure is the branch dictionary problem, not
+  normalization mismatch alone: we need nonlinear directions that are
+  simultaneously BT-gradient reachable and paired-view invariant. I then
+  implemented the direct generalized reach/invariance branch rule using
+  \(\mathcal A^*G\) energy over paired-difference cost. This falsified the
+  naive version of that idea: at cap `0.75`, depth-1 maximized target reach
+  (`target cos 0.726`) but broke the finite-step realization
+  (`actual-pred cos 0.077`) and worsened BT; reducing the post-LN cap to
+  `0.25` fixed the local finite-step coherence (`actual-pred 0.462`,
+  train BT `0.5793 -> 0.5696`) but full d12 still worsened every layer
+  (`0.6784/0.7039`, improve fraction `0.00`, all-PCA `0.1710`). Therefore
+  first-order reach divided by invariance cost is also insufficient; the next
+  object needs a curvature/compositionality term for repeated finite
+  LayerNorm-retracted steps. Detailed note:
+  `docs/cf_mlp_representation_learning/artifacts/layernorm_branch_dictionary_failure_note.md`.
+
 - EXPERIMENT/ANALYSIS (2026-06-28 07:52 CEST): Revisited the
   stable-mode preservation idea instead of discarding it. I added a
   standardized-tangent sample operator for OLS terms, so preservation can

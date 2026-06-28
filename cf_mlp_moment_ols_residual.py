@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from cf_mlp_barlow_clean import load_tensors
 from cf_mlp_bpbt_spectral_diagnostic import agreement_spectrum_metrics, transition_metrics
@@ -15,7 +16,7 @@ from cf_mlp_layer_mechanistic import covariance_spectrum, standardize_many
 from cf_mlp_residual_barlow import leaky_gelu
 from cf_mlp_residual_bt_variants import fit_cf_transform_with_prior_torch
 from cf_mlp_scalability import SweepPoint, write_jsonl
-from cf_mlp_scalability_gpu import normalize_hidden_with_stats_torch
+from cf_mlp_scalability_gpu import fit_cf_transform_torch, normalize_hidden_with_stats_torch
 
 
 def point_for(args, depth, seed):
@@ -110,6 +111,20 @@ def standardization_tangent_context(reference, eps=1e-4):
 
 def apply_standardized_tangent(delta, z, inv_scale):
     return standardization_tangent_project(delta * inv_scale.unsqueeze(0), z)
+
+
+def row_layernorm_torch(x, eps=1e-5):
+    return F.layer_norm(x, (x.shape[-1],), eps=float(eps))
+
+
+def row_layernorm_tangent(delta, reference, eps=1e-5):
+    ref = reference.to(dtype=delta.dtype)
+    centered_ref = ref - ref.mean(dim=1, keepdim=True)
+    scale = torch.sqrt(torch.mean(centered_ref * centered_ref, dim=1, keepdim=True) + float(eps))
+    normalized_ref = centered_ref / torch.clamp(scale, min=1e-12)
+    centered_delta = delta - delta.mean(dim=1, keepdim=True)
+    radial = normalized_ref * torch.mean(normalized_ref * centered_delta, dim=1, keepdim=True)
+    return (centered_delta - radial) / torch.clamp(scale, min=1e-12)
 
 
 def mode_balance_delta(delta_z, z, power, eps, min_gain, max_gain):
@@ -290,6 +305,52 @@ def bt_total_per_dim_torch(view1, view2, bt_lambda):
     return (on_diag + float(bt_lambda) * off_diag) / corr.shape[0]
 
 
+def bt_quadratic_energy_per_dim(delta_corr, bt_lambda):
+    diag = torch.diagonal(delta_corr)
+    diag_energy = torch.sum(diag * diag)
+    off_energy = torch.sum(delta_corr * delta_corr) - diag_energy
+    return (diag_energy + float(bt_lambda) * off_energy) / delta_corr.shape[0]
+
+
+def normalized_candidate_arrays(args, base, view1, view2, delta_base, delta_v1, delta_v2, scale):
+    cand_base = base + float(scale) * delta_base
+    cand_v1 = view1 + float(scale) * delta_v1
+    cand_v2 = view2 + float(scale) * delta_v2
+    if args.residual_normalization == "layernorm":
+        return [
+            row_layernorm_torch(cand_base, args.layernorm_eps),
+            row_layernorm_torch(cand_v1, args.layernorm_eps),
+            row_layernorm_torch(cand_v2, args.layernorm_eps),
+        ]
+    cand_train, _, _, _ = normalize_hidden_with_stats_torch([cand_base, cand_v1, cand_v2], [])
+    return cand_train
+
+
+def bt_quadratic_scale_from_realized_corr(args, base, view1, view2, delta_base, delta_v1, delta_v2):
+    _, _, corr, grad, _, _ = bt_corr_and_gradient(view1, view2, args.bt_lambda)
+    cand = normalized_candidate_arrays(args, base, view1, view2, delta_base, delta_v1, delta_v2, 1.0)
+    _, _, corr_after, _, _, _ = bt_corr_and_gradient(cand[1], cand[2], args.bt_lambda)
+    delta_corr = corr_after - corr
+    first_order = torch.sum(grad * delta_corr) / corr.shape[0]
+    quadratic = bt_quadratic_energy_per_dim(delta_corr, args.bt_lambda)
+    if first_order >= 0.0 or quadratic <= 0.0:
+        scale = torch.zeros((), dtype=view1.dtype, device=view1.device)
+    else:
+        scale = -first_order / torch.clamp(2.0 * quadratic, min=1e-12)
+        scale = torch.clamp(scale, min=0.0, max=float(args.bt_quadratic_scale_max))
+    predicted_delta = scale * first_order + scale * scale * quadratic
+    return float(scale.detach().cpu().item()), {
+        "bt_quadratic_full_first_order_delta": float(first_order.detach().cpu().item()),
+        "bt_quadratic_full_second_order_delta": float(quadratic.detach().cpu().item()),
+        "bt_quadratic_predicted_delta": float(predicted_delta.detach().cpu().item()),
+        "bt_quadratic_full_scale_unclipped": float(
+            (-first_order / torch.clamp(2.0 * quadratic, min=1e-12)).detach().cpu().item()
+        )
+        if float(quadratic.detach().cpu().item()) > 0.0
+        else float("nan"),
+    }
+
+
 def bt_score_stats_torch(view1, view2, bt_lambda):
     _, _, corr, _, _, _ = bt_corr_and_gradient(view1, view2, bt_lambda)
     diag = torch.diagonal(corr)
@@ -434,6 +495,148 @@ def branch_features(args, arrays, branch):
     return train_normed, test_normed, mean, scale
 
 
+def branch_covariance_moments(view1, view2, ridge):
+    out_dtype = view1.dtype
+    h1 = center_torch(view1).to(dtype=torch.float64)
+    h2 = center_torch(view2).to(dtype=torch.float64)
+    n = float(h1.shape[0])
+    sigma = 0.5 * ((h1.T @ h1) / n + (h2.T @ h2) / n)
+    diff = h1 - h2
+    delta = (diff.T @ diff) / n
+    sigma = 0.5 * (sigma + sigma.T)
+    delta = 0.5 * (delta + delta.T)
+    evals, evecs = torch.linalg.eigh(sigma)
+    evals = torch.clamp(evals, min=float(ridge))
+    sigma_inv_sqrt = (evecs / torch.sqrt(evals).unsqueeze(0)) @ evecs.T
+    return sigma.to(dtype=out_dtype), delta.to(dtype=out_dtype), sigma_inv_sqrt.to(dtype=out_dtype)
+
+
+def branch_reach_adjoint(args, current_train, branch_train):
+    _, view1, view2 = current_train
+    _, phi_v1, phi_v2 = branch_train
+    z1, z2, corr, grad, scale1, scale2 = bt_corr_and_gradient(view1, view2, args.bt_lambda)
+    target = -precondition_bt_gradient(grad, args.diag_gradient_multiplier)
+    inv_scale1 = 1.0 / torch.clamp(scale1, min=1e-12)
+    inv_scale2 = 1.0 / torch.clamp(scale2, min=1e-12)
+    if args.residual_normalization == "layernorm":
+        term = {
+            "type": "moment_layernorm",
+            "phi1": center_torch(phi_v1),
+            "phi2": center_torch(phi_v2),
+            "reference1": view1,
+            "reference2": view2,
+            "z1": z1,
+            "z2": z2,
+            "inv_scale1": inv_scale1,
+            "inv_scale2": inv_scale2,
+            "layernorm_eps": float(args.layernorm_eps),
+        }
+    else:
+        phi1 = center_torch(phi_v1)
+        phi2 = center_torch(phi_v2)
+        n = float(z1.shape[0])
+        term = {
+            "type": "moment",
+            "m1": (phi1.T @ z2) / n,
+            "m2": (z1.T @ phi2) / n,
+            "inv_scale1": inv_scale1,
+            "inv_scale2": inv_scale2,
+            "context": operator_context(args, phi1, phi2, z1, z2, corr),
+        }
+    return adjoint_term_operator(target, term)
+
+
+def grad_reach_branch_transform(args, current_train, branch_train):
+    sigma, delta, sigma_inv_sqrt = branch_covariance_moments(
+        branch_train[1],
+        branch_train[2],
+        args.branch_post_cov_ridge,
+    )
+    adjoint = branch_reach_adjoint(args, current_train, branch_train)
+    reach = (adjoint @ adjoint.T) / float(adjoint.shape[1])
+    reach = 0.5 * (reach + reach.T)
+    reach_w = sigma_inv_sqrt @ reach @ sigma_inv_sqrt
+    delta_w = sigma_inv_sqrt @ delta @ sigma_inv_sqrt
+    reach_w = 0.5 * (reach_w + reach_w.T)
+    delta_w = 0.5 * (delta_w + delta_w.T)
+    invariance_ridge = 1.0 / max(float(args.branch_post_invariance), 1e-12)
+    denom = delta_w + invariance_ridge * torch.eye(
+        delta_w.shape[0],
+        dtype=delta_w.dtype,
+        device=delta_w.device,
+    )
+    denom_evals, denom_evecs = torch.linalg.eigh(denom.to(dtype=torch.float64))
+    denom_evals = torch.clamp(denom_evals, min=float(args.branch_post_cov_ridge))
+    denom_inv_sqrt = (denom_evecs / torch.sqrt(denom_evals).unsqueeze(0)) @ denom_evecs.T
+    score = denom_inv_sqrt @ reach_w.to(dtype=torch.float64) @ denom_inv_sqrt
+    score = 0.5 * (score + score.T)
+    score_evals, score_evecs = torch.linalg.eigh(score)
+    order = torch.argsort(score_evals, descending=True)
+    count = min(branch_train[1].shape[1], int(args.branch_post_dim) if int(args.branch_post_dim) > 0 else branch_train[1].shape[1])
+    order = order[:count]
+    basis_w = denom_inv_sqrt @ score_evecs[:, order]
+    transform = sigma_inv_sqrt.to(dtype=torch.float64) @ basis_w
+    transform = transform.to(dtype=branch_train[1].dtype)
+    selected = basis_w
+    selected_reach = torch.sum(selected * (reach_w.to(dtype=torch.float64) @ selected), dim=0)
+    selected_delta = torch.sum(selected * (delta_w.to(dtype=torch.float64) @ selected), dim=0)
+    return transform, {
+        "branch_post_reach_score_mean": float(torch.mean(score_evals[order]).detach().cpu().item()),
+        "branch_post_reach_score_max": float(torch.max(score_evals[order]).detach().cpu().item()),
+        "branch_post_reach_mean": float(torch.mean(selected_reach).detach().cpu().item()),
+        "branch_post_delta_mean": float(torch.mean(selected_delta).detach().cpu().item()),
+    }
+
+
+def branch_post_transform_features(args, current_train, branch_train, branch_test):
+    metrics = {
+        "branch_post_transform": args.branch_post_transform,
+        "branch_post_invariance": float(args.branch_post_invariance),
+        "branch_post_mean_gain": float("nan"),
+        "branch_post_min_gain": float("nan"),
+        "branch_post_max_delta": float("nan"),
+        "branch_post_reach_score_mean": float("nan"),
+        "branch_post_reach_score_max": float("nan"),
+        "branch_post_reach_mean": float("nan"),
+        "branch_post_delta_mean": float("nan"),
+    }
+    if args.branch_post_transform == "none":
+        return branch_train, branch_test, metrics
+    if args.branch_post_transform == "cf_shrink":
+        fitted = fit_cf_transform_torch(
+            branch_train[1],
+            branch_train[2],
+            branch_train[1].shape[1],
+            invariance_strength=args.branch_post_invariance,
+        )
+        transform = fitted["transform"]
+        transformed_train = [arr @ transform for arr in branch_train]
+        transformed_test = [arr @ transform for arr in branch_test]
+        transformed_train, transformed_test, _, _ = normalize_hidden_with_stats_torch(
+            transformed_train,
+            transformed_test,
+        )
+        metrics.update(
+            {
+                "branch_post_mean_gain": fitted["mean_gain"],
+                "branch_post_min_gain": fitted["min_gain"],
+                "branch_post_max_delta": fitted["max_whitened_delta"],
+            }
+        )
+        return transformed_train, transformed_test, metrics
+    if args.branch_post_transform == "grad_reach":
+        transform, reach_metrics = grad_reach_branch_transform(args, current_train, branch_train)
+        transformed_train = [arr @ transform for arr in branch_train]
+        transformed_test = [arr @ transform for arr in branch_test]
+        transformed_train, transformed_test, _, _ = normalize_hidden_with_stats_torch(
+            transformed_train,
+            transformed_test,
+        )
+        metrics.update(reach_metrics)
+        return transformed_train, transformed_test, metrics
+    raise ValueError(f"Unknown branch post-transform: {args.branch_post_transform}")
+
+
 def residualized_branch_features(current_train, current_test, branch_train, branch_test, ridge):
     ref_train = torch.cat(current_train, dim=0)
     phi_train = torch.cat(branch_train, dim=0)
@@ -461,11 +664,98 @@ def residualized_branch_features(current_train, current_test, branch_train, bran
     }
 
 
+def project_onto_basis(features, basis, ridge):
+    gram = basis.T @ basis
+    eye = torch.eye(gram.shape[0], dtype=gram.dtype, device=gram.device)
+    coef = torch.linalg.solve(gram + float(ridge) * eye, basis.T)
+    return features @ basis @ coef
+
+
+def filter_residual_branch_features(args, residual_train, residual_test, metrics):
+    metrics = dict(metrics)
+    metrics.update(
+        {
+            "branch_novelty_filter_count": 0,
+            "branch_novelty_filter_mean_delta": float("nan"),
+            "branch_novelty_filter_max_delta": float("nan"),
+            "branch_novelty_filter_energy_fraction": float("nan"),
+            "branch_novelty_filter_mean_gain": float("nan"),
+            "branch_novelty_filter_min_gain": float("nan"),
+        }
+    )
+    if args.branch_novelty_filter == "none":
+        return residual_train, residual_test, metrics
+    if args.branch_novelty_filter == "agreement_shrink":
+        fitted = fit_cf_transform_torch(
+            residual_train[1],
+            residual_train[2],
+            residual_train[1].shape[1],
+            invariance_strength=args.branch_novelty_filter_invariance,
+        )
+        transform = fitted["transform"]
+        filtered_train = [arr @ transform for arr in residual_train]
+        filtered_test = [arr @ transform for arr in residual_test]
+        numerator = sum(torch.sum(arr * arr) for arr in filtered_train)
+        denominator = sum(torch.sum(arr * arr) for arr in residual_train)
+        metrics.update(
+            {
+                "branch_novelty_filter_count": int(transform.shape[1]),
+                "branch_novelty_filter_mean_delta": fitted["max_whitened_delta"],
+                "branch_novelty_filter_max_delta": fitted["max_whitened_delta"],
+                "branch_novelty_filter_energy_fraction": float(
+                    (numerator / torch.clamp(denominator, min=1e-12)).detach().cpu().item()
+                ),
+                "branch_novelty_filter_mean_delta": float("nan"),
+                "branch_novelty_filter_mean_gain": fitted["mean_gain"],
+                "branch_novelty_filter_min_gain": fitted["min_gain"],
+            }
+        )
+        return filtered_train, filtered_test, metrics
+    basis, basis_metrics = stable_mode_basis(
+        residual_train[1],
+        residual_train[2],
+        args.branch_novelty_filter_count,
+        args.branch_novelty_filter_ridge,
+        args.branch_novelty_filter_max_delta,
+        args.branch_novelty_filter,
+    )
+    metrics.update(
+        {
+            "branch_novelty_filter_count": basis_metrics["stable_mode_count"],
+            "branch_novelty_filter_mean_delta": basis_metrics["stable_mode_mean_delta"],
+            "branch_novelty_filter_max_delta": basis_metrics["stable_mode_max_delta"],
+        }
+    )
+    if basis is None:
+        filtered_train = [torch.zeros_like(arr) for arr in residual_train]
+        filtered_test = [torch.zeros_like(arr) for arr in residual_test]
+        metrics["branch_novelty_filter_energy_fraction"] = 0.0
+        return filtered_train, filtered_test, metrics
+    filtered_train = [
+        project_onto_basis(arr, basis, args.branch_novelty_filter_projection_ridge) for arr in residual_train
+    ]
+    filtered_test = [
+        project_onto_basis(arr, basis, args.branch_novelty_filter_projection_ridge) for arr in residual_test
+    ]
+    numerator = sum(torch.sum(arr * arr) for arr in filtered_train)
+    denominator = sum(torch.sum(arr * arr) for arr in residual_train)
+    metrics["branch_novelty_filter_energy_fraction"] = float(
+        (numerator / torch.clamp(denominator, min=1e-12)).detach().cpu().item()
+    )
+    return filtered_train, filtered_test, metrics
+
+
 def build_branch_dictionary(args, current_train, current_test, branch_train, branch_test):
     if args.branch_novelty_mode == "mix" and float(args.branch_novelty_mix) <= 0.0:
         return branch_train, branch_test, {
             "branch_residual_energy_fraction": float("nan"),
             "branch_projection_r2": float("nan"),
+            "branch_novelty_filter_count": 0,
+            "branch_novelty_filter_mean_delta": float("nan"),
+            "branch_novelty_filter_max_delta": float("nan"),
+            "branch_novelty_filter_energy_fraction": float("nan"),
+            "branch_novelty_filter_mean_gain": float("nan"),
+            "branch_novelty_filter_min_gain": float("nan"),
         }
     residual_train, residual_test, metrics = residualized_branch_features(
         current_train,
@@ -474,6 +764,7 @@ def build_branch_dictionary(args, current_train, current_test, branch_train, bra
         branch_test,
         args.branch_residual_ridge,
     )
+    residual_train, residual_test, metrics = filter_residual_branch_features(args, residual_train, residual_test, metrics)
     if args.branch_novelty_mode == "mix":
         mix = float(args.branch_novelty_mix)
         mixed_train = [(1.0 - mix) * old + mix * new for old, new in zip(branch_train, residual_train)]
@@ -520,6 +811,14 @@ def line_search_eval_indices(args, layer_idx, seed, n, device):
     return torch.randperm(n, generator=gen, device=device)[: int(args.line_search_eval_size)]
 
 
+def bt_quadratic_eval_indices(args, layer_idx, seed, n, device):
+    if int(args.bt_quadratic_eval_size) <= 0 or int(args.bt_quadratic_eval_size) >= n:
+        return None
+    gen = torch.Generator(device=device)
+    gen.manual_seed(int(seed) + 433494437 * (int(layer_idx) + 1))
+    return torch.randperm(n, generator=gen, device=device)[: int(args.bt_quadratic_eval_size)]
+
+
 def old_span_adaptive_eval_indices(args, layer_idx, seed, n, device):
     if int(args.old_span_adaptive_eval_size) <= 0 or int(args.old_span_adaptive_eval_size) >= n:
         return None
@@ -551,6 +850,15 @@ def apply_moment_operator(b, m1, m2, inv_scale1, inv_scale2, context):
     return out
 
 
+def apply_layernorm_moment_operator(b, term):
+    delta1 = row_layernorm_tangent(term["phi1"] @ b, term["reference1"], term["layernorm_eps"])
+    delta2 = row_layernorm_tangent(term["phi2"] @ b, term["reference2"], term["layernorm_eps"])
+    dz1 = apply_standardized_tangent(delta1, term["z1"], term["inv_scale1"])
+    dz2 = apply_standardized_tangent(delta2, term["z2"], term["inv_scale2"])
+    n = float(term["z1"].shape[0])
+    return (dz1.T @ term["z2"] + term["z1"].T @ dz2) / n
+
+
 def adjoint_moment_operator(e, m1, m2, inv_scale1, inv_scale2, context):
     grad = (m1 @ e.T) * inv_scale1.unsqueeze(0) + (m2.T @ e) * inv_scale2.unsqueeze(0)
     if context["mode"] == "projected":
@@ -562,12 +870,25 @@ def adjoint_moment_operator(e, m1, m2, inv_scale1, inv_scale2, context):
     return grad
 
 
+def adjoint_layernorm_moment_operator(e, term):
+    n = float(term["z1"].shape[0])
+    grad_dz1 = (term["z2"] @ e.T) / n
+    grad_dz2 = (term["z1"] @ e) / n
+    grad_y1 = apply_standardized_tangent(grad_dz1, term["z1"], term["inv_scale1"])
+    grad_y2 = apply_standardized_tangent(grad_dz2, term["z2"], term["inv_scale2"])
+    grad_u1 = row_layernorm_tangent(grad_y1, term["reference1"], term["layernorm_eps"])
+    grad_u2 = row_layernorm_tangent(grad_y2, term["reference2"], term["layernorm_eps"])
+    return term["phi1"].T @ grad_u1 + term["phi2"].T @ grad_u2
+
+
 def normal_operator(b, m1, m2, inv_scale1, inv_scale2, context, rho):
     e = apply_moment_operator(b, m1, m2, inv_scale1, inv_scale2, context)
     return adjoint_moment_operator(e, m1, m2, inv_scale1, inv_scale2, context) + float(rho) * b
 
 
 def apply_term_operator(b, term):
+    if term.get("type") == "moment_layernorm":
+        return apply_layernorm_moment_operator(b, term)
     if term.get("type") in {"sample", "sample_tangent"}:
         out = term["features"] @ b
         if term.get("type") == "sample_tangent":
@@ -678,6 +999,8 @@ def select_old_span_candidate(candidates, before_score, args):
 
 
 def adjoint_term_operator(e, term):
+    if term.get("type") == "moment_layernorm":
+        return adjoint_layernorm_moment_operator(e, term)
     if term.get("type") == "sample":
         if "right" in term:
             return (term["features"].T @ e @ term["right"].T) / float(term["features"].shape[0])
@@ -775,10 +1098,15 @@ def cg_solve_moment_ols(m1, m2, target, inv_scale1, inv_scale2, context, rho, ma
     }
 
 
-def finite_difference_corr_delta(view1, view2, delta1, delta2, corr, scale):
+def finite_difference_corr_delta(view1, view2, delta1, delta2, corr, scale, residual_normalization, layernorm_eps):
+    cand1 = view1 + float(scale) * delta1
+    cand2 = view2 + float(scale) * delta2
+    if residual_normalization == "layernorm":
+        cand1 = row_layernorm_torch(cand1, layernorm_eps)
+        cand2 = row_layernorm_torch(cand2, layernorm_eps)
     _, _, corr_after, _, _, _ = bt_corr_and_gradient(
-        view1 + float(scale) * delta1,
-        view2 + float(scale) * delta2,
+        cand1,
+        cand2,
         1.0,
     )
     return (corr_after - corr) / float(scale)
@@ -798,6 +1126,29 @@ def relative_r2(pred, target):
 
 def rms_scalar(x):
     return float(torch.sqrt(torch.mean(x * x)).detach().cpu().item())
+
+
+def layernorm_post_update_ratio(reference, delta, scale, eps):
+    updated = row_layernorm_torch(reference + float(scale) * delta, eps)
+    return rms_torch(updated - reference) / torch.clamp(rms_torch(reference), min=1e-12)
+
+
+def layernorm_post_update_cap_scale(reference, delta, cap, eps):
+    if float(cap) <= 0.0:
+        return 1.0
+    full_ratio = layernorm_post_update_ratio(reference, delta, 1.0, eps)
+    if full_ratio <= float(cap):
+        return 1.0
+    lo = 0.0
+    hi = 1.0
+    for _ in range(24):
+        mid = 0.5 * (lo + hi)
+        ratio = layernorm_post_update_ratio(reference, delta, mid, eps)
+        if ratio <= float(cap):
+            lo = mid
+        else:
+            hi = mid
+    return lo
 
 
 def stable_mode_update_diagnostics(
@@ -878,6 +1229,19 @@ def numpy_path(train, test, view1, view2):
 
 
 def run_variant(args, point, tensors, variant, device):
+    if args.residual_normalization == "layernorm":
+        unsupported = []
+        if float(args.sample_gradient_weight) > 0.0:
+            unsupported.append("--sample-gradient-weight")
+        if float(args.self_cov_weight) > 0.0:
+            unsupported.append("--self-cov-weight")
+        if float(args.old_span_update_penalty) > 0.0 or args.old_span_adaptive_path:
+            unsupported.append("--old-span-update-penalty/--old-span-adaptive-path")
+        if float(args.stable_mode_penalty) > 0.0:
+            unsupported.append("--stable-mode-penalty")
+        if unsupported:
+            joined = ", ".join(unsupported)
+            raise ValueError(f"LayerNorm residual mode currently supports the clean BT moment objective only; got {joined}")
     xtr = tensors["xtr"]
     xte = tensors["xte"]
     view1_tr = tensors["view1_tr"]
@@ -890,6 +1254,13 @@ def run_variant(args, point, tensors, variant, device):
     )
     base_tr, view1_tr, view2_tr = train_arrays
     base_te, view1_te, view2_te = test_arrays
+    if args.residual_normalization == "layernorm":
+        base_tr = row_layernorm_torch(base_tr, args.layernorm_eps)
+        view1_tr = row_layernorm_torch(view1_tr, args.layernorm_eps)
+        view2_tr = row_layernorm_torch(view2_tr, args.layernorm_eps)
+        base_te = row_layernorm_torch(base_te, args.layernorm_eps)
+        view1_te = row_layernorm_torch(view1_te, args.layernorm_eps)
+        view2_te = row_layernorm_torch(view2_te, args.layernorm_eps)
 
     path_train = []
     path_test = []
@@ -910,6 +1281,12 @@ def run_variant(args, point, tensors, variant, device):
             args,
             [base_tr, view1_tr, view2_tr, base_te, view1_te, view2_te],
             branch,
+        )
+        branch_train, branch_test, branch_post_metrics = branch_post_transform_features(
+            args,
+            [base_tr, view1_tr, view2_tr],
+            branch_train,
+            branch_test,
         )
         branch_train, branch_test, branch_projection_metrics = build_branch_dictionary(
             args,
@@ -950,17 +1327,34 @@ def run_variant(args, point, tensors, variant, device):
             inv_scale1_i = 1.0 / torch.clamp(scale1_i, min=1e-12)
             inv_scale2_i = 1.0 / torch.clamp(scale2_i, min=1e-12)
             context_i = operator_context(args, phi1_i, phi2_i, z1_i, z2_i, corr_i)
-            bt_term_i = {
-                "type": "moment",
-                "name": "bt_cross",
-                "weight": fit_weight * float(args.moment_target_weight),
-                "m1": m1_i,
-                "m2": m2_i,
-                "inv_scale1": inv_scale1_i,
-                "inv_scale2": inv_scale2_i,
-                "context": context_i,
-                "target": target_i,
-            }
+            if args.residual_normalization == "layernorm":
+                bt_term_i = {
+                    "type": "moment_layernorm",
+                    "name": "bt_cross",
+                    "weight": fit_weight * float(args.moment_target_weight),
+                    "phi1": phi1_i,
+                    "phi2": phi2_i,
+                    "reference1": view1_fit,
+                    "reference2": view2_fit,
+                    "z1": z1_i,
+                    "z2": z2_i,
+                    "inv_scale1": inv_scale1_i,
+                    "inv_scale2": inv_scale2_i,
+                    "layernorm_eps": float(args.layernorm_eps),
+                    "target": target_i,
+                }
+            else:
+                bt_term_i = {
+                    "type": "moment",
+                    "name": "bt_cross",
+                    "weight": fit_weight * float(args.moment_target_weight),
+                    "m1": m1_i,
+                    "m2": m2_i,
+                    "inv_scale1": inv_scale1_i,
+                    "inv_scale2": inv_scale2_i,
+                    "context": context_i,
+                    "target": target_i,
+                }
             terms.append(bt_term_i)
             if float(args.sample_gradient_weight) > 0.0:
                 sample_target1_i, sample_target2_i = activation_gradient_targets(
@@ -1395,12 +1789,72 @@ def run_variant(args, point, tensors, variant, device):
             self_achieved1 = self_achieved1 * applied_scale
             self_achieved2 = self_achieved2 * applied_scale
             delta_base = delta_base * applied_scale
+        if args.residual_normalization == "layernorm" and float(args.max_postnorm_update_ratio) > 0.0:
+            post_scale = layernorm_post_update_cap_scale(
+                base_before,
+                delta_base,
+                args.max_postnorm_update_ratio,
+                args.layernorm_eps,
+            )
+            if post_scale < 1.0:
+                b = b * post_scale
+                achieved = achieved * post_scale
+                self_achieved1 = self_achieved1 * post_scale
+                self_achieved2 = self_achieved2 * post_scale
+                delta_base = delta_base * post_scale
+                applied_scale = applied_scale * post_scale
 
         delta_v1 = phi_v1 @ b
         delta_v2 = phi_v2 @ b
         delta_base_te = phi_base_te @ b
         delta_v1_te = phi_v1_te @ b
         delta_v2_te = phi_v2_te @ b
+
+        bt_quadratic_scale = 1.0
+        bt_quadratic_metrics = {
+            "bt_quadratic_full_first_order_delta": float("nan"),
+            "bt_quadratic_full_second_order_delta": float("nan"),
+            "bt_quadratic_predicted_delta": float("nan"),
+            "bt_quadratic_full_scale_unclipped": float("nan"),
+        }
+        if args.bt_quadratic_scale:
+            idx_quad_eval = bt_quadratic_eval_indices(
+                args, layer_idx, point.seed, view1_tr.shape[0], view1_tr.device
+            )
+            if idx_quad_eval is None:
+                quad_base = base_tr
+                quad_v1 = view1_tr
+                quad_v2 = view2_tr
+                quad_delta_base = delta_base
+                quad_delta_v1 = delta_v1
+                quad_delta_v2 = delta_v2
+            else:
+                quad_base = base_tr[idx_quad_eval]
+                quad_v1 = view1_tr[idx_quad_eval]
+                quad_v2 = view2_tr[idx_quad_eval]
+                quad_delta_base = delta_base[idx_quad_eval]
+                quad_delta_v1 = delta_v1[idx_quad_eval]
+                quad_delta_v2 = delta_v2[idx_quad_eval]
+            bt_quadratic_scale, bt_quadratic_metrics = bt_quadratic_scale_from_realized_corr(
+                args,
+                quad_base,
+                quad_v1,
+                quad_v2,
+                quad_delta_base,
+                quad_delta_v1,
+                quad_delta_v2,
+            )
+            b = b * bt_quadratic_scale
+            achieved = achieved * bt_quadratic_scale
+            self_achieved1 = self_achieved1 * bt_quadratic_scale
+            self_achieved2 = self_achieved2 * bt_quadratic_scale
+            delta_base = delta_base * bt_quadratic_scale
+            delta_v1 = delta_v1 * bt_quadratic_scale
+            delta_v2 = delta_v2 * bt_quadratic_scale
+            delta_base_te = delta_base_te * bt_quadratic_scale
+            delta_v1_te = delta_v1_te * bt_quadratic_scale
+            delta_v2_te = delta_v2_te * bt_quadratic_scale
+            applied_scale = applied_scale * bt_quadratic_scale
 
         line_search_scale = 1.0
         line_search_bt = float("nan")
@@ -1440,7 +1894,14 @@ def run_variant(args, point, tensors, variant, device):
                 cand_base = base_tr + float(candidate_scale) * delta_base
                 cand_v1 = view1_tr + float(candidate_scale) * delta_v1
                 cand_v2 = view2_tr + float(candidate_scale) * delta_v2
-                cand_train, _, _, _ = normalize_hidden_with_stats_torch([cand_base, cand_v1, cand_v2], [])
+                if args.residual_normalization == "layernorm":
+                    cand_train = [
+                        row_layernorm_torch(cand_base, args.layernorm_eps),
+                        row_layernorm_torch(cand_v1, args.layernorm_eps),
+                        row_layernorm_torch(cand_v2, args.layernorm_eps),
+                    ]
+                else:
+                    cand_train, _, _, _ = normalize_hidden_with_stats_torch([cand_base, cand_v1, cand_v2], [])
                 if idx_line_eval is None:
                     cand_eval = cand_train
                 else:
@@ -1514,7 +1975,16 @@ def run_variant(args, point, tensors, variant, device):
         else:
             delta_v1_fit = delta_v1[idx_fit]
             delta_v2_fit = delta_v2[idx_fit]
-        fd_corr_delta = finite_difference_corr_delta(view1_fit, view2_fit, delta_v1_fit, delta_v2_fit, corr, args.fd_scale)
+        fd_corr_delta = finite_difference_corr_delta(
+            view1_fit,
+            view2_fit,
+            delta_v1_fit,
+            delta_v2_fit,
+            corr,
+            args.fd_scale,
+            args.residual_normalization,
+            args.layernorm_eps,
+        )
 
         base_next = base_tr + delta_base
         view1_next = view1_tr + delta_v1
@@ -1523,12 +1993,20 @@ def run_variant(args, point, tensors, variant, device):
         view1_next_te = view1_te + delta_v1_te
         view2_next_te = view2_te + delta_v2_te
 
-        train_arrays, test_arrays, _, _ = normalize_hidden_with_stats_torch(
-            [base_next, view1_next, view2_next],
-            [base_next_te, view1_next_te, view2_next_te],
-        )
-        base_tr, view1_tr, view2_tr = train_arrays
-        base_te, view1_te, view2_te = test_arrays
+        if args.residual_normalization == "layernorm":
+            base_tr = row_layernorm_torch(base_next, args.layernorm_eps)
+            view1_tr = row_layernorm_torch(view1_next, args.layernorm_eps)
+            view2_tr = row_layernorm_torch(view2_next, args.layernorm_eps)
+            base_te = row_layernorm_torch(base_next_te, args.layernorm_eps)
+            view1_te = row_layernorm_torch(view1_next_te, args.layernorm_eps)
+            view2_te = row_layernorm_torch(view2_next_te, args.layernorm_eps)
+        else:
+            train_arrays, test_arrays, _, _ = normalize_hidden_with_stats_torch(
+                [base_next, view1_next, view2_next],
+                [base_next_te, view1_next_te, view2_next_te],
+            )
+            base_tr, view1_tr, view2_tr = train_arrays
+            base_te, view1_te, view2_te = test_arrays
         if idx_fit is None:
             view1_fit_after = view1_tr
             view2_fit_after = view2_tr
@@ -1559,6 +2037,8 @@ def run_variant(args, point, tensors, variant, device):
         after_bt = bt_hidden_metrics(v1_np, v2_np, args.bt_lambda)
         after_test_bt = bt_hidden_metrics(v1_test_np, v2_test_np, args.bt_lambda)
         after_sd = shared_difference_metrics(v1_np, v2_np)
+        actual_base_update = base_tr - base_before
+        actual_view1_update = view1_tr - view1_before
         if float(args.stable_mode_penalty) > 0.0 or args.stable_mode_diagnostic:
             stable_update_diag = stable_mode_update_diagnostics(
                 view1_before,
@@ -1584,10 +2064,21 @@ def run_variant(args, point, tensors, variant, device):
             "dataset": point.dataset,
             "depth": point.depth,
             "width": point.width,
+            "residual_normalization": args.residual_normalization,
+            "layernorm_eps": float(args.layernorm_eps),
             "branch_dim": int(args.branch_dim),
             "branch_feature_dim": int(phi_v1.shape[1]),
             "branch_random_blend": float(args.branch_random_blend),
             "branch_shared_power": float(args.branch_shared_power),
+            "branch_post_transform": branch_post_metrics["branch_post_transform"],
+            "branch_post_invariance": branch_post_metrics["branch_post_invariance"],
+            "branch_post_mean_gain": branch_post_metrics["branch_post_mean_gain"],
+            "branch_post_min_gain": branch_post_metrics["branch_post_min_gain"],
+            "branch_post_max_delta": branch_post_metrics["branch_post_max_delta"],
+            "branch_post_reach_score_mean": branch_post_metrics["branch_post_reach_score_mean"],
+            "branch_post_reach_score_max": branch_post_metrics["branch_post_reach_score_max"],
+            "branch_post_reach_mean": branch_post_metrics["branch_post_reach_mean"],
+            "branch_post_delta_mean": branch_post_metrics["branch_post_delta_mean"],
             "branch_mode_balance_power": float(args.branch_mode_balance_power),
             "branch_mode_balance_side": args.branch_mode_balance_side,
             "branch_mode_balance_eps": float(args.branch_mode_balance_eps),
@@ -1599,6 +2090,19 @@ def run_variant(args, point, tensors, variant, device):
             "branch_residual_ridge": float(args.branch_residual_ridge),
             "branch_residual_energy_fraction": branch_projection_metrics["branch_residual_energy_fraction"],
             "branch_projection_r2": branch_projection_metrics["branch_projection_r2"],
+            "branch_novelty_filter": args.branch_novelty_filter,
+            "branch_novelty_filter_count_requested": int(args.branch_novelty_filter_count),
+            "branch_novelty_filter_count": branch_projection_metrics["branch_novelty_filter_count"],
+            "branch_novelty_filter_ridge": float(args.branch_novelty_filter_ridge),
+            "branch_novelty_filter_max_delta_threshold": float(args.branch_novelty_filter_max_delta),
+            "branch_novelty_filter_mean_delta": branch_projection_metrics["branch_novelty_filter_mean_delta"],
+            "branch_novelty_filter_max_delta": branch_projection_metrics["branch_novelty_filter_max_delta"],
+            "branch_novelty_filter_energy_fraction": branch_projection_metrics[
+                "branch_novelty_filter_energy_fraction"
+            ],
+            "branch_novelty_filter_mean_gain": branch_projection_metrics["branch_novelty_filter_mean_gain"],
+            "branch_novelty_filter_min_gain": branch_projection_metrics["branch_novelty_filter_min_gain"],
+            "branch_novelty_filter_projection_ridge": float(args.branch_novelty_filter_projection_ridge),
             "moment_batch_size": int(args.moment_batch_size),
             "moment_ensembles": int(args.moment_ensembles),
             "layer": layer_idx + 1,
@@ -1673,7 +2177,20 @@ def run_variant(args, point, tensors, variant, device):
             "diag_gradient_multiplier": float(args.diag_gradient_multiplier),
             "self_cov_weight": float(args.self_cov_weight),
             "max_update_ratio": float(args.max_update_ratio),
+            "max_postnorm_update_ratio": float(args.max_postnorm_update_ratio),
             "applied_scale": applied_scale,
+            "bt_quadratic_scale_enabled": bool(args.bt_quadratic_scale),
+            "bt_quadratic_scale": bt_quadratic_scale,
+            "bt_quadratic_eval_size": int(args.bt_quadratic_eval_size),
+            "bt_quadratic_scale_max": float(args.bt_quadratic_scale_max),
+            "bt_quadratic_full_first_order_delta": bt_quadratic_metrics[
+                "bt_quadratic_full_first_order_delta"
+            ],
+            "bt_quadratic_full_second_order_delta": bt_quadratic_metrics[
+                "bt_quadratic_full_second_order_delta"
+            ],
+            "bt_quadratic_predicted_delta": bt_quadratic_metrics["bt_quadratic_predicted_delta"],
+            "bt_quadratic_full_scale_unclipped": bt_quadratic_metrics["bt_quadratic_full_scale_unclipped"],
             "line_search_scale": line_search_scale,
             "line_search_mode": args.line_search_mode,
             "line_search_eval_size": int(args.line_search_eval_size),
@@ -1747,7 +2264,14 @@ def run_variant(args, point, tensors, variant, device):
             "corr_grad_norm": float(torch.linalg.vector_norm(grad).detach().cpu().item()),
             "residual_update_over_input_rms": float((rms_torch(delta_base) / torch.clamp(base_rms_before, min=1e-12)).detach().cpu().item()),
             "view1_update_over_input_rms": float((rms_torch(delta_v1) / torch.clamp(view1_rms_before, min=1e-12)).detach().cpu().item()),
+            "actual_postnorm_update_over_input_rms": float(
+                (rms_torch(actual_base_update) / torch.clamp(base_rms_before, min=1e-12)).detach().cpu().item()
+            ),
+            "actual_view1_postnorm_update_over_input_rms": float(
+                (rms_torch(actual_view1_update) / torch.clamp(view1_rms_before, min=1e-12)).detach().cpu().item()
+            ),
             "update_input_row_cosine": row_cosine_torch(delta_base, base_before),
+            "actual_postnorm_update_input_row_cosine": row_cosine_torch(actual_base_update, base_before),
         }
         row.update(solve)
         row.update({f"after_{key}": value for key, value in covariance_spectrum(train_np).items()})
@@ -1873,7 +2397,26 @@ def summarize(mech_rows, readout_summaries):
                     np.mean([row["first_order_actual_loss_delta_per_dim"] for row in rows])
                 ),
                 "mean_update_over_input_rms": float(np.mean([row["residual_update_over_input_rms"] for row in rows])),
+                "mean_actual_postnorm_update_over_input_rms": float(
+                    np.mean([row["actual_postnorm_update_over_input_rms"] for row in rows])
+                ),
+                "mean_actual_postnorm_update_input_row_cosine": float(
+                    np.mean([row["actual_postnorm_update_input_row_cosine"] for row in rows])
+                ),
                 "mean_applied_scale": float(np.mean([row["applied_scale"] for row in rows])),
+                "mean_bt_quadratic_scale": safe_nanmean([row["bt_quadratic_scale"] for row in rows]),
+                "mean_bt_quadratic_full_first_order_delta": safe_nanmean(
+                    [row["bt_quadratic_full_first_order_delta"] for row in rows]
+                ),
+                "mean_bt_quadratic_full_second_order_delta": safe_nanmean(
+                    [row["bt_quadratic_full_second_order_delta"] for row in rows]
+                ),
+                "mean_bt_quadratic_predicted_delta": safe_nanmean(
+                    [row["bt_quadratic_predicted_delta"] for row in rows]
+                ),
+                "mean_bt_quadratic_full_scale_unclipped": safe_nanmean(
+                    [row["bt_quadratic_full_scale_unclipped"] for row in rows]
+                ),
                 "mean_line_search_scale": float(np.mean([row["line_search_scale"] for row in rows])),
                 "mean_sample_target_residual_energy_fraction": safe_nanmean(
                     [row["sample_target_residual_energy_fraction"] for row in rows]
@@ -1884,8 +2427,34 @@ def summarize(mech_rows, readout_summaries):
                 "mean_sample_target_residual_rescale_gain": safe_nanmean(
                     [row["sample_target_residual_rescale_gain"] for row in rows]
                 ),
+                "mean_branch_post_mean_gain": safe_nanmean([row["branch_post_mean_gain"] for row in rows]),
+                "mean_branch_post_min_gain": safe_nanmean([row["branch_post_min_gain"] for row in rows]),
+                "mean_branch_post_max_delta": safe_nanmean([row["branch_post_max_delta"] for row in rows]),
+                "mean_branch_post_reach_score_mean": safe_nanmean(
+                    [row["branch_post_reach_score_mean"] for row in rows]
+                ),
+                "mean_branch_post_reach_score_max": safe_nanmean(
+                    [row["branch_post_reach_score_max"] for row in rows]
+                ),
+                "mean_branch_post_reach_mean": safe_nanmean([row["branch_post_reach_mean"] for row in rows]),
+                "mean_branch_post_delta_mean": safe_nanmean([row["branch_post_delta_mean"] for row in rows]),
                 "mean_old_span_feature_projection_energy_fraction": safe_nanmean(
                     [row["old_span_feature_projection_energy_fraction"] for row in rows]
+                ),
+                "mean_branch_novelty_filter_count": safe_nanmean(
+                    [row["branch_novelty_filter_count"] for row in rows]
+                ),
+                "mean_branch_novelty_filter_mean_delta": safe_nanmean(
+                    [row["branch_novelty_filter_mean_delta"] for row in rows]
+                ),
+                "mean_branch_novelty_filter_energy_fraction": safe_nanmean(
+                    [row["branch_novelty_filter_energy_fraction"] for row in rows]
+                ),
+                "mean_branch_novelty_filter_mean_gain": safe_nanmean(
+                    [row["branch_novelty_filter_mean_gain"] for row in rows]
+                ),
+                "mean_branch_novelty_filter_min_gain": safe_nanmean(
+                    [row["branch_novelty_filter_min_gain"] for row in rows]
                 ),
                 "mean_old_span_effective_weight": safe_nanmean(
                     [row["old_span_effective_weight"] for row in rows]
@@ -2113,11 +2682,21 @@ def main():
     parser.add_argument("--line-search-min-bt-gain", type=float, default=0.0)
     parser.add_argument("--self-cov-weight", type=float, default=0.0)
     parser.add_argument("--line-search-self-cov-weight", type=float, default=-1.0)
+    parser.add_argument("--bt-quadratic-scale", action="store_true")
+    parser.add_argument("--bt-quadratic-eval-size", type=int, default=0)
+    parser.add_argument("--bt-quadratic-scale-max", type=float, default=1.0)
     parser.add_argument("--moment-batch-size", type=int, default=0)
     parser.add_argument("--moment-ensembles", type=int, default=1)
+    parser.add_argument("--residual-normalization", choices=["feature", "layernorm"], default="feature")
+    parser.add_argument("--layernorm-eps", type=float, default=1e-5)
+    parser.add_argument("--max-postnorm-update-ratio", type=float, default=0.0)
     parser.add_argument("--branch-dim", type=int, default=128)
     parser.add_argument("--branch-random-blend", type=float, default=0.0)
     parser.add_argument("--branch-shared-power", type=float, default=0.0)
+    parser.add_argument("--branch-post-transform", choices=["none", "cf_shrink", "grad_reach"], default="none")
+    parser.add_argument("--branch-post-invariance", type=float, default=1.0)
+    parser.add_argument("--branch-post-dim", type=int, default=0)
+    parser.add_argument("--branch-post-cov-ridge", type=float, default=1e-4)
     parser.add_argument("--branch-mode-balance-power", type=float, default=0.0)
     parser.add_argument("--branch-mode-balance-side", choices=["input", "output", "both"], default="input")
     parser.add_argument("--branch-mode-balance-eps", type=float, default=1e-3)
@@ -2126,6 +2705,16 @@ def main():
     parser.add_argument("--branch-novelty-mode", choices=["mix", "concat"], default="mix")
     parser.add_argument("--branch-novelty-mix", type=float, default=0.0)
     parser.add_argument("--branch-novelty-scale", type=float, default=1.0)
+    parser.add_argument(
+        "--branch-novelty-filter",
+        choices=["none", "agreement", "pca", "agreement_shrink"],
+        default="none",
+    )
+    parser.add_argument("--branch-novelty-filter-invariance", type=float, default=1.0)
+    parser.add_argument("--branch-novelty-filter-count", type=int, default=128)
+    parser.add_argument("--branch-novelty-filter-ridge", type=float, default=1e-3)
+    parser.add_argument("--branch-novelty-filter-max-delta", type=float, default=0.0)
+    parser.add_argument("--branch-novelty-filter-projection-ridge", type=float, default=1e-5)
     parser.add_argument("--branch-residual-ridge", type=float, default=1e-3)
     parser.add_argument("--activation-alpha", type=float, default=0.5)
     parser.add_argument("--cf-invariance", type=float, default=1.0)
