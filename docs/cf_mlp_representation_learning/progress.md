@@ -1,5 +1,29 @@
 # Progress
 
+- EXPERIMENT/ANALYSIS (2026-06-28 11:38 CEST): Replaced the fixed branch
+  gain-floor diagnostic with a per-layer adaptive LayerNorm residual rule that
+  evaluates candidate floors using the same realized BT-quadratic guard as the
+  applied update. The first rule,
+  \(g_l=\max g:\langle\nabla L_{\rm BT},\Delta C_l(g)\rangle<0\), proved
+  useful but underconstrained: on CIFAR100/SimCLR d24 it selected floor `0.50`
+  in every layer and improved representation breadth/readout
+  (`0.3427/0.3792` train/test BT, rank `30.4`, last/all-PCA
+  `0.1838/0.1948`), but extending the path to `0.75,1.0` exposed the flaw:
+  technically descending near-null steps were selected, giving much worse BT
+  (`0.4356/0.5046`) while raising rank (`60.8`) and all-PCA (`0.1964`).
+  The derived repair is a Pareto progress rule: maximize floor only among
+  candidates retaining a fixed fraction of the best local predicted quadratic
+  BT decrease,
+  \(-\widehat{\Delta L}_g \ge \tau\max_{g'}(-\widehat{\Delta L}_{g'})\).
+  With \(\tau=0.5\), d12 reached `0.3727/0.3995`, rank `24.8`,
+  last/all-PCA `0.1810/0.1916`, and d24 reached `0.3394/0.3786`,
+  rank `33.2`, last/all-PCA `0.1866/0.1986`, best layer `0.1922@16`, with
+  every layer BT-improving. This is the strongest LayerNorm residual CF-BT
+  representation result so far and the first one with useful depth-scaled
+  last-layer quality, though held-out BT remains worse than old
+  feature-normalized old-span adaptive (`0.3173/0.3334`). Detailed note:
+  `docs/cf_mlp_representation_learning/artifacts/descent_constrained_gain_floor_note.md`.
+
 - EXPERIMENT/ANALYSIS (2026-06-28 10:42 CEST): Implemented and tested the
   natural branch-metric continuum suggested by the previous failure: a paired
   CF gain floor in the whitened paired-difference basis,

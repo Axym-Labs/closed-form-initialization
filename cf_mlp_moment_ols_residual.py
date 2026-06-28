@@ -1,4 +1,5 @@
 import argparse
+import copy
 import csv
 import gc
 import math
@@ -1297,6 +1298,345 @@ def shared_difference_metrics(view1, view2):
     }
 
 
+def gain_floor_adaptive_path(args):
+    values = [float(value) for value in args.branch_post_gain_floor_adaptive_path]
+    values.append(float(args.branch_post_gain_floor))
+    values.append(0.0)
+    return sorted({round(value, 12) for value in values})
+
+
+def validate_gain_floor_adaptive_args(args):
+    if args.residual_normalization != "layernorm":
+        raise ValueError("--branch-post-gain-floor-adaptive-path requires --residual-normalization layernorm")
+    if args.branch_post_transform != "cf_shrink":
+        raise ValueError("--branch-post-gain-floor-adaptive-path currently requires --branch-post-transform cf_shrink")
+    if not args.bt_quadratic_scale:
+        raise ValueError("--branch-post-gain-floor-adaptive-path requires --bt-quadratic-scale")
+    if len(args.line_search_scales) > 1:
+        raise ValueError("--branch-post-gain-floor-adaptive-path does not combine with --line-search-scales")
+    unsupported = []
+    if float(args.sample_gradient_weight) > 0.0:
+        unsupported.append("--sample-gradient-weight")
+    if float(args.self_cov_weight) > 0.0:
+        unsupported.append("--self-cov-weight")
+    if float(args.old_span_update_penalty) > 0.0 or args.old_span_adaptive_path:
+        unsupported.append("--old-span-update-penalty/--old-span-adaptive-path")
+    if float(args.stable_mode_penalty) > 0.0:
+        unsupported.append("--stable-mode-penalty")
+    if unsupported:
+        raise ValueError(
+            "--branch-post-gain-floor-adaptive-path is intentionally a clean LayerNorm BT diagnostic; "
+            f"unsupported options: {', '.join(unsupported)}"
+        )
+
+
+def gain_floor_candidate_record(candidate, margin):
+    first_order = candidate["bt_quadratic_metrics"]["bt_quadratic_full_first_order_delta"]
+    predicted_delta = candidate["bt_quadratic_metrics"]["bt_quadratic_predicted_delta"]
+    scale = candidate["bt_quadratic_scale"]
+    feasible = bool(scale > 0.0 and first_order < -float(margin))
+    return {
+        "floor": candidate["gain_floor"],
+        "first_order": first_order,
+        "second_order": candidate["bt_quadratic_metrics"]["bt_quadratic_full_second_order_delta"],
+        "predicted_delta": predicted_delta,
+        "predicted_gain": max(0.0, -float(predicted_delta)),
+        "scale": scale,
+        "feasible": feasible,
+    }
+
+
+def choose_gain_floor_from_records(args, records):
+    feasible = [record for record in records if record["feasible"]]
+    if not feasible:
+        return min(records, key=lambda item: item["first_order"])["floor"]
+    if args.branch_post_gain_floor_adaptive_rule == "descent":
+        return max(feasible, key=lambda item: item["floor"])["floor"]
+    if args.branch_post_gain_floor_adaptive_rule == "progress_fraction":
+        best_gain = max(record["predicted_gain"] for record in feasible)
+        if best_gain <= 0.0:
+            return max(feasible, key=lambda item: item["floor"])["floor"]
+        threshold = float(args.branch_post_gain_floor_adaptive_progress_fraction) * best_gain
+        progress_feasible = [record for record in feasible if record["predicted_gain"] >= threshold]
+        return max(progress_feasible, key=lambda item: item["floor"])["floor"]
+    raise ValueError(f"Unknown branch gain-floor adaptive rule: {args.branch_post_gain_floor_adaptive_rule}")
+
+
+def solve_layernorm_gain_floor_candidate(
+    args,
+    point,
+    layer_idx,
+    eta_layer,
+    current_train,
+    current_test,
+    raw_branch_train,
+    raw_branch_test,
+    gain_floor,
+):
+    cand_args = copy.copy(args)
+    cand_args.branch_post_gain_floor = float(gain_floor)
+    branch_train, branch_test, branch_post_metrics = branch_post_transform_features(
+        cand_args,
+        current_train,
+        raw_branch_train,
+        raw_branch_test,
+    )
+    branch_train, branch_test, branch_projection_metrics = build_branch_dictionary(
+        cand_args,
+        current_train,
+        current_test,
+        branch_train,
+        branch_test,
+    )
+    base_tr, view1_tr, view2_tr = current_train
+    base_te, view1_te, view2_te = current_test
+    phi_base, phi_v1, phi_v2 = branch_train
+    phi_base_te, phi_v1_te, phi_v2_te = branch_test
+    idx_fits = fit_index_list(cand_args, layer_idx, point.seed, view1_tr.shape[0], view1_tr.device)
+    terms = []
+    fit_weight = 1.0 / float(len(idx_fits))
+    diagnostic = {}
+    layernorm_kinetic_metrics = []
+    for fit_idx, idx_fit in enumerate(idx_fits):
+        if idx_fit is None:
+            base_fit = base_tr
+            view1_fit = view1_tr
+            view2_fit = view2_tr
+            phi_base_fit = phi_base
+            phi_v1_fit = phi_v1
+            phi_v2_fit = phi_v2
+        else:
+            base_fit = base_tr[idx_fit]
+            view1_fit = view1_tr[idx_fit]
+            view2_fit = view2_tr[idx_fit]
+            phi_base_fit = phi_base[idx_fit]
+            phi_v1_fit = phi_v1[idx_fit]
+            phi_v2_fit = phi_v2[idx_fit]
+        z1_i, z2_i, corr_i, grad_i, scale1_i, scale2_i = bt_corr_and_gradient(
+            view1_fit,
+            view2_fit,
+            cand_args.bt_lambda,
+        )
+        target_grad_i = precondition_bt_gradient(grad_i, cand_args.diag_gradient_multiplier)
+        target_i = moment_delta_target(cand_args, corr_i, grad_i, eta_layer)
+        phi1_i = center_torch(phi_v1_fit)
+        phi2_i = center_torch(phi_v2_fit)
+        inv_scale1_i = 1.0 / torch.clamp(scale1_i, min=1e-12)
+        inv_scale2_i = 1.0 / torch.clamp(scale2_i, min=1e-12)
+        bt_term_i = {
+            "type": "moment_layernorm",
+            "name": "bt_cross",
+            "weight": fit_weight * float(cand_args.moment_target_weight),
+            "phi1": phi1_i,
+            "phi2": phi2_i,
+            "reference1": view1_fit,
+            "reference2": view2_fit,
+            "z1": z1_i,
+            "z2": z2_i,
+            "inv_scale1": inv_scale1_i,
+            "inv_scale2": inv_scale2_i,
+            "layernorm_eps": float(cand_args.layernorm_eps),
+            "target": target_i,
+        }
+        terms.append(bt_term_i)
+        if float(cand_args.layernorm_kinetic_weight) > 0.0:
+            kinetic_streams = [
+                ("view1", phi_v1_fit, view1_fit),
+                ("view2", phi_v2_fit, view2_fit),
+            ]
+            if cand_args.layernorm_kinetic_include_base:
+                kinetic_streams.insert(0, ("base", phi_base_fit, base_fit))
+            kinetic_terms, kinetic_metrics_i = make_layernorm_kinetic_terms(
+                cand_args,
+                fit_weight,
+                layer_idx,
+                fit_idx,
+                point.seed,
+                bt_term_i,
+                kinetic_streams,
+                (phi_v1.shape[1], view1_tr.shape[1]),
+                view1_tr.dtype,
+                view1_tr.device,
+            )
+            terms.extend(kinetic_terms)
+            layernorm_kinetic_metrics.append(kinetic_metrics_i)
+        if fit_idx == 0:
+            diagnostic = {
+                "idx_fit": idx_fit,
+                "view1_fit": view1_fit,
+                "view2_fit": view2_fit,
+                "z1": z1_i,
+                "z2": z2_i,
+                "corr": corr_i,
+                "grad": grad_i,
+                "target_grad": target_grad_i,
+                "target": target_i,
+                "self_corr1": (z1_i.T @ z1_i) / float(z1_i.shape[0]),
+                "self_corr2": (z2_i.T @ z2_i) / float(z2_i.shape[0]),
+            }
+    if layernorm_kinetic_metrics:
+        layernorm_kinetic_summary = {
+            key: float(np.mean([item[key] for item in layernorm_kinetic_metrics]))
+            for key in layernorm_kinetic_metrics[0]
+        }
+    else:
+        layernorm_kinetic_summary = {
+            "layernorm_kinetic_stream_count": 0,
+            "layernorm_kinetic_operator_scale": float("nan"),
+            "layernorm_kinetic_effective_weight": float("nan"),
+        }
+    idx_fit = diagnostic["idx_fit"]
+    z1 = diagnostic["z1"]
+    corr = diagnostic["corr"]
+    b, solve = cg_solve_moment_ols_terms(
+        terms,
+        (phi_v1.shape[1], z1.shape[1]),
+        z1.dtype,
+        z1.device,
+        cand_args.ols_ridge,
+        cand_args.cg_iters,
+        cand_args.cg_tol,
+    )
+    bt_term = first_term_named(terms, "bt_cross")
+    achieved = apply_term_operator(b, bt_term)
+    self_achieved1 = torch.zeros_like(corr)
+    self_achieved2 = torch.zeros_like(corr)
+
+    base_before = base_tr
+    view1_before = view1_tr
+    view2_before = view2_tr
+    base_rms_before = rms_torch(base_before)
+    view1_rms_before = rms_torch(view1_before)
+    delta_base = phi_base @ b
+    update_ratio = rms_torch(delta_base) / torch.clamp(base_rms_before, min=1e-12)
+    applied_scale = 1.0
+    if cand_args.max_update_ratio > 0 and update_ratio > float(cand_args.max_update_ratio):
+        applied_scale = float((float(cand_args.max_update_ratio) / update_ratio).detach().cpu().item())
+        b = b * applied_scale
+        achieved = achieved * applied_scale
+        delta_base = delta_base * applied_scale
+    if float(cand_args.max_postnorm_update_ratio) > 0.0:
+        post_scale = layernorm_post_update_cap_scale(
+            base_before,
+            delta_base,
+            cand_args.max_postnorm_update_ratio,
+            cand_args.layernorm_eps,
+        )
+        if post_scale < 1.0:
+            b = b * post_scale
+            achieved = achieved * post_scale
+            delta_base = delta_base * post_scale
+            applied_scale = applied_scale * post_scale
+
+    delta_v1 = phi_v1 @ b
+    delta_v2 = phi_v2 @ b
+    delta_base_te = phi_base_te @ b
+    delta_v1_te = phi_v1_te @ b
+    delta_v2_te = phi_v2_te @ b
+
+    idx_quad_eval = bt_quadratic_eval_indices(
+        cand_args,
+        layer_idx,
+        point.seed,
+        view1_tr.shape[0],
+        view1_tr.device,
+    )
+    if idx_quad_eval is None:
+        quad_base = base_tr
+        quad_v1 = view1_tr
+        quad_v2 = view2_tr
+        quad_delta_base = delta_base
+        quad_delta_v1 = delta_v1
+        quad_delta_v2 = delta_v2
+    else:
+        quad_base = base_tr[idx_quad_eval]
+        quad_v1 = view1_tr[idx_quad_eval]
+        quad_v2 = view2_tr[idx_quad_eval]
+        quad_delta_base = delta_base[idx_quad_eval]
+        quad_delta_v1 = delta_v1[idx_quad_eval]
+        quad_delta_v2 = delta_v2[idx_quad_eval]
+    bt_quadratic_scale, bt_quadratic_metrics = bt_quadratic_scale_from_realized_corr(
+        cand_args,
+        quad_base,
+        quad_v1,
+        quad_v2,
+        quad_delta_base,
+        quad_delta_v1,
+        quad_delta_v2,
+    )
+    b = b * bt_quadratic_scale
+    achieved = achieved * bt_quadratic_scale
+    delta_base = delta_base * bt_quadratic_scale
+    delta_v1 = delta_v1 * bt_quadratic_scale
+    delta_v2 = delta_v2 * bt_quadratic_scale
+    delta_base_te = delta_base_te * bt_quadratic_scale
+    delta_v1_te = delta_v1_te * bt_quadratic_scale
+    delta_v2_te = delta_v2_te * bt_quadratic_scale
+    applied_scale = applied_scale * bt_quadratic_scale
+
+    if idx_fit is None:
+        delta_v1_fit = delta_v1
+        delta_v2_fit = delta_v2
+    else:
+        delta_v1_fit = delta_v1[idx_fit]
+        delta_v2_fit = delta_v2[idx_fit]
+    fd_corr_delta = finite_difference_corr_delta(
+        diagnostic["view1_fit"],
+        diagnostic["view2_fit"],
+        delta_v1_fit,
+        delta_v2_fit,
+        corr,
+        cand_args.fd_scale,
+        cand_args.residual_normalization,
+        cand_args.layernorm_eps,
+    )
+    return {
+        "gain_floor": float(gain_floor),
+        "branch_train": branch_train,
+        "branch_test": branch_test,
+        "branch_post_metrics": branch_post_metrics,
+        "branch_projection_metrics": branch_projection_metrics,
+        "phi_base": phi_base,
+        "phi_v1": phi_v1,
+        "phi_v2": phi_v2,
+        "phi_base_te": phi_base_te,
+        "phi_v1_te": phi_v1_te,
+        "phi_v2_te": phi_v2_te,
+        "diagnostic": diagnostic,
+        "layernorm_kinetic_summary": layernorm_kinetic_summary,
+        "b": b,
+        "solve": solve,
+        "achieved": achieved,
+        "self_achieved1": self_achieved1,
+        "self_achieved2": self_achieved2,
+        "base_before": base_before,
+        "view1_before": view1_before,
+        "view2_before": view2_before,
+        "base_rms_before": base_rms_before,
+        "view1_rms_before": view1_rms_before,
+        "delta_base": delta_base,
+        "delta_v1": delta_v1,
+        "delta_v2": delta_v2,
+        "delta_base_te": delta_base_te,
+        "delta_v1_te": delta_v1_te,
+        "delta_v2_te": delta_v2_te,
+        "fd_corr_delta": fd_corr_delta,
+        "applied_scale": applied_scale,
+        "bt_quadratic_scale": bt_quadratic_scale,
+        "bt_quadratic_metrics": bt_quadratic_metrics,
+    }
+
+
+def adaptive_record_string(records):
+    return ";".join(
+        (
+            f"{item['floor']:.4g}:{item['first_order']:.4g}:{item['predicted_gain']:.4g}:"
+            f"{item['scale']:.4g}:{int(item['feasible'])}"
+        )
+        for item in records
+    )
+
+
 def numpy_path(train, test, view1, view2):
     htr, hte, hv1, hv2 = standardize_many(
         train.detach().cpu().numpy().astype(np.float32),
@@ -1307,7 +1647,435 @@ def numpy_path(train, test, view1, view2):
     return htr, hte, hv1, hv2
 
 
+def run_variant_adaptive_gain_floor(args, point, tensors, variant, device):
+    validate_gain_floor_adaptive_args(args)
+    xtr = tensors["xtr"]
+    xte = tensors["xte"]
+    view1_tr = tensors["view1_tr"]
+    view2_tr = tensors["view2_tr"]
+    view1_te = tensors["view1_te"]
+    view2_te = tensors["view2_te"]
+    train_arrays, test_arrays, _, _ = normalize_hidden_with_stats_torch(
+        [xtr, view1_tr, view2_tr],
+        [xte, view1_te, view2_te],
+    )
+    base_tr, view1_tr, view2_tr = train_arrays
+    base_te, view1_te, view2_te = test_arrays
+    base_tr = row_layernorm_torch(base_tr, args.layernorm_eps)
+    view1_tr = row_layernorm_torch(view1_tr, args.layernorm_eps)
+    view2_tr = row_layernorm_torch(view2_tr, args.layernorm_eps)
+    base_te = row_layernorm_torch(base_te, args.layernorm_eps)
+    view1_te = row_layernorm_torch(view1_te, args.layernorm_eps)
+    view2_te = row_layernorm_torch(view2_te, args.layernorm_eps)
+
+    floor_path = gain_floor_adaptive_path(args)
+    path_train = []
+    path_test = []
+    path_view1 = []
+    path_view2 = []
+    path_view1_test = []
+    path_view2_test = []
+    rows = []
+    prev_train_np = None
+    eta_layer = float(args.eta_total) / float(point.depth)
+
+    for layer_idx in range(point.depth):
+        before_train_np, before_test_np, before_v1_np, before_v2_np = numpy_path(
+            base_tr,
+            base_te,
+            view1_tr,
+            view2_tr,
+        )
+        before_bt = bt_hidden_metrics(before_v1_np, before_v2_np, args.bt_lambda)
+        before_sd = shared_difference_metrics(before_v1_np, before_v2_np)
+        branch = branch_matrix(args, variant, layer_idx, view1_tr, view2_tr, point.seed)
+        raw_branch_train, raw_branch_test, _, _ = branch_features(
+            args,
+            [base_tr, view1_tr, view2_tr, base_te, view1_te, view2_te],
+            branch,
+        )
+
+        candidate_records = []
+        for gain_floor in floor_path:
+            candidate = solve_layernorm_gain_floor_candidate(
+                args,
+                point,
+                layer_idx,
+                eta_layer,
+                [base_tr, view1_tr, view2_tr],
+                [base_te, view1_te, view2_te],
+                raw_branch_train,
+                raw_branch_test,
+                gain_floor,
+            )
+            candidate_records.append(gain_floor_candidate_record(candidate, args.branch_post_gain_floor_adaptive_margin))
+            del candidate
+        selected_floor = choose_gain_floor_from_records(args, candidate_records)
+        candidate = solve_layernorm_gain_floor_candidate(
+            args,
+            point,
+            layer_idx,
+            eta_layer,
+            [base_tr, view1_tr, view2_tr],
+            [base_te, view1_te, view2_te],
+            raw_branch_train,
+            raw_branch_test,
+            selected_floor,
+        )
+        feasible_count = sum(1 for item in candidate_records if item["feasible"])
+        selected_record = next(item for item in candidate_records if item["floor"] == selected_floor)
+        selected_feasible = bool(selected_record["feasible"])
+
+        branch_post_metrics = candidate["branch_post_metrics"]
+        branch_projection_metrics = candidate["branch_projection_metrics"]
+        phi_v1 = candidate["phi_v1"]
+        diagnostic = candidate["diagnostic"]
+        idx_fit = diagnostic["idx_fit"]
+        view1_fit = diagnostic["view1_fit"]
+        view2_fit = diagnostic["view2_fit"]
+        corr = diagnostic["corr"]
+        grad = diagnostic["grad"]
+        target = diagnostic["target"]
+        self_corr1 = diagnostic["self_corr1"]
+        self_corr2 = diagnostic["self_corr2"]
+        achieved = candidate["achieved"]
+        self_achieved1 = candidate["self_achieved1"]
+        self_achieved2 = candidate["self_achieved2"]
+        base_before = candidate["base_before"]
+        view1_before = candidate["view1_before"]
+        view2_before = candidate["view2_before"]
+        base_rms_before = candidate["base_rms_before"]
+        view1_rms_before = candidate["view1_rms_before"]
+        delta_base = candidate["delta_base"]
+        delta_v1 = candidate["delta_v1"]
+        delta_v2 = candidate["delta_v2"]
+        delta_base_te = candidate["delta_base_te"]
+        delta_v1_te = candidate["delta_v1_te"]
+        delta_v2_te = candidate["delta_v2_te"]
+        fd_corr_delta = candidate["fd_corr_delta"]
+        applied_scale = candidate["applied_scale"]
+        bt_quadratic_scale = candidate["bt_quadratic_scale"]
+        bt_quadratic_metrics = candidate["bt_quadratic_metrics"]
+        layernorm_kinetic_summary = candidate["layernorm_kinetic_summary"]
+
+        base_next = base_tr + delta_base
+        view1_next = view1_tr + delta_v1
+        view2_next = view2_tr + delta_v2
+        base_next_te = base_te + delta_base_te
+        view1_next_te = view1_te + delta_v1_te
+        view2_next_te = view2_te + delta_v2_te
+        base_tr = row_layernorm_torch(base_next, args.layernorm_eps)
+        view1_tr = row_layernorm_torch(view1_next, args.layernorm_eps)
+        view2_tr = row_layernorm_torch(view2_next, args.layernorm_eps)
+        base_te = row_layernorm_torch(base_next_te, args.layernorm_eps)
+        view1_te = row_layernorm_torch(view1_next_te, args.layernorm_eps)
+        view2_te = row_layernorm_torch(view2_next_te, args.layernorm_eps)
+
+        if idx_fit is None:
+            view1_fit_after = view1_tr
+            view2_fit_after = view2_tr
+        else:
+            view1_fit_after = view1_tr[idx_fit]
+            view2_fit_after = view2_tr[idx_fit]
+        _, _, corr_after_torch, _, _, _ = bt_corr_and_gradient(view1_fit_after, view2_fit_after, args.bt_lambda)
+        actual_corr_delta = corr_after_torch - corr
+        z1_fit_after = standardize_torch(view1_fit_after)
+        z2_fit_after = standardize_torch(view2_fit_after)
+        self_corr1_fit_after = (z1_fit_after.T @ z1_fit_after) / float(z1_fit_after.shape[0])
+        self_corr2_fit_after = (z2_fit_after.T @ z2_fit_after) / float(z2_fit_after.shape[0])
+        actual_self_delta1 = self_corr1_fit_after - self_corr1
+        actual_self_delta2 = self_corr2_fit_after - self_corr2
+
+        train_np, test_np, v1_np, v2_np = numpy_path(base_tr, base_te, view1_tr, view2_tr)
+        _, _, v1_test_np, v2_test_np = numpy_path(base_tr, base_te, view1_te, view2_te)
+        path_train.append(train_np)
+        path_test.append(test_np)
+        path_view1.append(v1_np)
+        path_view2.append(v2_np)
+        path_view1_test.append(v1_test_np)
+        path_view2_test.append(v2_test_np)
+
+        after_bt = bt_hidden_metrics(v1_np, v2_np, args.bt_lambda)
+        after_test_bt = bt_hidden_metrics(v1_test_np, v2_test_np, args.bt_lambda)
+        after_sd = shared_difference_metrics(v1_np, v2_np)
+        actual_base_update = base_tr - base_before
+        actual_view1_update = view1_tr - view1_before
+        stable_update_diag = {
+            "stable_mode_diag_count": 0,
+            "stable_mode_raw_update_rms": float("nan"),
+            "stable_mode_tangent_update_rms": float("nan"),
+            "stable_mode_actual_delta_rms": float("nan"),
+            "stable_mode_raw_actual_cosine": float("nan"),
+            "stable_mode_tangent_actual_cosine": float("nan"),
+        }
+        row = {
+            "variant": variant,
+            "seed": point.seed,
+            "dataset": point.dataset,
+            "depth": point.depth,
+            "width": point.width,
+            "residual_normalization": args.residual_normalization,
+            "layernorm_eps": float(args.layernorm_eps),
+            "layernorm_kinetic_weight": float(args.layernorm_kinetic_weight),
+            "layernorm_kinetic_normalization": args.layernorm_kinetic_normalization,
+            "layernorm_kinetic_include_base": bool(args.layernorm_kinetic_include_base),
+            "layernorm_kinetic_stream_count": layernorm_kinetic_summary["layernorm_kinetic_stream_count"],
+            "layernorm_kinetic_operator_scale": layernorm_kinetic_summary["layernorm_kinetic_operator_scale"],
+            "layernorm_kinetic_effective_weight": layernorm_kinetic_summary["layernorm_kinetic_effective_weight"],
+            "branch_dim": int(args.branch_dim),
+            "branch_feature_dim": int(phi_v1.shape[1]),
+            "branch_random_blend": float(args.branch_random_blend),
+            "branch_shared_power": float(args.branch_shared_power),
+            "branch_post_transform": branch_post_metrics["branch_post_transform"],
+            "branch_post_invariance": branch_post_metrics["branch_post_invariance"],
+            "branch_post_mean_gain": branch_post_metrics["branch_post_mean_gain"],
+            "branch_post_min_gain": branch_post_metrics["branch_post_min_gain"],
+            "branch_post_gain_floor": branch_post_metrics["branch_post_gain_floor"],
+            "branch_post_gain_floor_adaptive_path": " ".join(str(value) for value in floor_path),
+            "branch_post_gain_floor_adaptive_rule": args.branch_post_gain_floor_adaptive_rule,
+            "branch_post_gain_floor_adaptive_margin": float(args.branch_post_gain_floor_adaptive_margin),
+            "branch_post_gain_floor_adaptive_progress_fraction": float(
+                args.branch_post_gain_floor_adaptive_progress_fraction
+            ),
+            "branch_post_gain_floor_adaptive_candidate_count": len(candidate_records),
+            "branch_post_gain_floor_adaptive_feasible_count": feasible_count,
+            "branch_post_gain_floor_adaptive_selected_feasible": int(selected_feasible),
+            "branch_post_gain_floor_adaptive_selected_floor": candidate["gain_floor"],
+            "branch_post_gain_floor_adaptive_selected_predicted_gain": selected_record["predicted_gain"],
+            "branch_post_gain_floor_adaptive_records": adaptive_record_string(candidate_records),
+            "branch_post_max_delta": branch_post_metrics["branch_post_max_delta"],
+            "branch_post_reach_score_mean": branch_post_metrics["branch_post_reach_score_mean"],
+            "branch_post_reach_score_max": branch_post_metrics["branch_post_reach_score_max"],
+            "branch_post_reach_mean": branch_post_metrics["branch_post_reach_mean"],
+            "branch_post_delta_mean": branch_post_metrics["branch_post_delta_mean"],
+            "branch_mode_balance_power": float(args.branch_mode_balance_power),
+            "branch_mode_balance_side": args.branch_mode_balance_side,
+            "branch_mode_balance_eps": float(args.branch_mode_balance_eps),
+            "branch_mode_balance_min_gain": float(args.branch_mode_balance_min_gain),
+            "branch_mode_balance_max_gain": float(args.branch_mode_balance_max_gain),
+            "branch_novelty_mode": args.branch_novelty_mode,
+            "branch_novelty_mix": float(args.branch_novelty_mix),
+            "branch_novelty_scale": float(args.branch_novelty_scale),
+            "branch_residual_ridge": float(args.branch_residual_ridge),
+            "branch_residual_energy_fraction": branch_projection_metrics["branch_residual_energy_fraction"],
+            "branch_projection_r2": branch_projection_metrics["branch_projection_r2"],
+            "branch_novelty_filter": args.branch_novelty_filter,
+            "branch_novelty_filter_count_requested": int(args.branch_novelty_filter_count),
+            "branch_novelty_filter_count": branch_projection_metrics["branch_novelty_filter_count"],
+            "branch_novelty_filter_ridge": float(args.branch_novelty_filter_ridge),
+            "branch_novelty_filter_max_delta_threshold": float(args.branch_novelty_filter_max_delta),
+            "branch_novelty_filter_mean_delta": branch_projection_metrics["branch_novelty_filter_mean_delta"],
+            "branch_novelty_filter_max_delta": branch_projection_metrics["branch_novelty_filter_max_delta"],
+            "branch_novelty_filter_energy_fraction": branch_projection_metrics[
+                "branch_novelty_filter_energy_fraction"
+            ],
+            "branch_novelty_filter_mean_gain": branch_projection_metrics["branch_novelty_filter_mean_gain"],
+            "branch_novelty_filter_min_gain": branch_projection_metrics["branch_novelty_filter_min_gain"],
+            "branch_novelty_filter_projection_ridge": float(args.branch_novelty_filter_projection_ridge),
+            "moment_batch_size": int(args.moment_batch_size),
+            "moment_ensembles": int(args.moment_ensembles),
+            "layer": layer_idx + 1,
+            "eta_total": float(args.eta_total),
+            "eta_layer": eta_layer,
+            "ols_ridge": float(args.ols_ridge),
+            "moment_target_kind": args.moment_target_kind,
+            "moment_target_weight": float(args.moment_target_weight),
+            "polar_target_weight": float(args.polar_target_weight),
+            "sample_gradient_weight": float(args.sample_gradient_weight),
+            "sample_gradient_scale": float(args.sample_gradient_scale),
+            "sample_target_projection": args.sample_target_projection,
+            "sample_target_residual_ridge": float(args.sample_target_residual_ridge),
+            "sample_target_rescale_max": float(args.sample_target_rescale_max),
+            "sample_target_residual_energy_fraction": float("nan"),
+            "sample_target_projection_r2": float("nan"),
+            "sample_target_residual_rescale_gain": float("nan"),
+            "sample_mode_balance_power": float(args.sample_mode_balance_power),
+            "sample_mode_balance_eps": float(args.sample_mode_balance_eps),
+            "sample_mode_balance_min_gain": float(args.sample_mode_balance_min_gain),
+            "sample_mode_balance_max_gain": float(args.sample_mode_balance_max_gain),
+            "stable_mode_penalty": float(args.stable_mode_penalty),
+            "stable_mode_count_requested": int(args.stable_mode_count),
+            "stable_mode_kind": args.stable_mode_kind,
+            "stable_mode_tangent": args.stable_mode_tangent,
+            "stable_mode_count": 0,
+            "stable_mode_ridge": float(args.stable_mode_ridge),
+            "stable_mode_max_delta_threshold": float(args.stable_mode_max_delta),
+            "stable_mode_mean_delta": float("nan"),
+            "stable_mode_max_delta": float("nan"),
+            "stable_mode_normalization": args.stable_mode_normalization,
+            "stable_mode_effective_weight": float("nan"),
+            "stable_mode_weight_min": float(args.stable_mode_weight_min),
+            "stable_mode_weight_max": float(args.stable_mode_weight_max),
+            "stable_mode_diag_count": stable_update_diag["stable_mode_diag_count"],
+            "stable_mode_raw_update_rms": stable_update_diag["stable_mode_raw_update_rms"],
+            "stable_mode_tangent_update_rms": stable_update_diag["stable_mode_tangent_update_rms"],
+            "stable_mode_actual_delta_rms": stable_update_diag["stable_mode_actual_delta_rms"],
+            "stable_mode_raw_actual_cosine": stable_update_diag["stable_mode_raw_actual_cosine"],
+            "stable_mode_tangent_actual_cosine": stable_update_diag["stable_mode_tangent_actual_cosine"],
+            "old_span_update_penalty": float(args.old_span_update_penalty),
+            "old_span_update_ridge": float(args.old_span_update_ridge),
+            "old_span_update_normalization": args.old_span_update_normalization,
+            "old_span_update_tangent": args.old_span_update_tangent,
+            "old_span_update_weight_min": float(args.old_span_update_weight_min),
+            "old_span_update_weight_max": float(args.old_span_update_weight_max),
+            "old_span_effective_weight": float("nan"),
+            "old_span_adaptive_path": " ".join(str(value) for value in args.old_span_adaptive_path),
+            "old_span_adaptive_rule": args.old_span_adaptive_rule,
+            "old_span_adaptive_metric": args.old_span_adaptive_metric,
+            "old_span_adaptive_eval_size": int(args.old_span_adaptive_eval_size),
+            "old_span_adaptive_bt_fraction": float(args.old_span_adaptive_bt_fraction),
+            "old_span_adaptive_nuclear_weight": float(args.old_span_adaptive_nuclear_weight),
+            "old_span_selected_penalty": float(args.old_span_update_penalty),
+            "old_span_adaptive_before_bt": float("nan"),
+            "old_span_adaptive_before_nuclear": float("nan"),
+            "old_span_adaptive_best_bt": float("nan"),
+            "old_span_adaptive_best_gain": float("nan"),
+            "old_span_adaptive_selected_bt": float("nan"),
+            "old_span_adaptive_selected_nuclear": float("nan"),
+            "old_span_adaptive_selected_gain": float("nan"),
+            "old_span_adaptive_selected_score": float("nan"),
+            "old_span_adaptive_selected_old_rms": float("nan"),
+            "old_span_adaptive_candidate_count": 0,
+            "old_span_feature_projection_energy_fraction": float("nan"),
+            "diag_gradient_multiplier": float(args.diag_gradient_multiplier),
+            "self_cov_weight": float(args.self_cov_weight),
+            "max_update_ratio": float(args.max_update_ratio),
+            "max_postnorm_update_ratio": float(args.max_postnorm_update_ratio),
+            "applied_scale": applied_scale,
+            "bt_quadratic_scale_enabled": bool(args.bt_quadratic_scale),
+            "bt_quadratic_scale": bt_quadratic_scale,
+            "bt_quadratic_eval_size": int(args.bt_quadratic_eval_size),
+            "bt_quadratic_scale_max": float(args.bt_quadratic_scale_max),
+            "bt_quadratic_full_first_order_delta": bt_quadratic_metrics[
+                "bt_quadratic_full_first_order_delta"
+            ],
+            "bt_quadratic_full_second_order_delta": bt_quadratic_metrics[
+                "bt_quadratic_full_second_order_delta"
+            ],
+            "bt_quadratic_predicted_delta": bt_quadratic_metrics["bt_quadratic_predicted_delta"],
+            "bt_quadratic_full_scale_unclipped": bt_quadratic_metrics["bt_quadratic_full_scale_unclipped"],
+            "line_search_scale": 1.0,
+            "line_search_mode": args.line_search_mode,
+            "line_search_eval_size": int(args.line_search_eval_size),
+            "line_search_cap_after_layer": int(args.line_search_cap_after_layer),
+            "line_search_max_scale_after_cap": float(args.line_search_max_scale_after_cap),
+            "line_search_self_cov_weight": float(
+                args.line_search_self_cov_weight if args.line_search_self_cov_weight >= 0.0 else args.self_cov_weight
+            ),
+            "line_search_bt_total_per_dim": float("nan"),
+            "line_search_self_cov_offdiag_per_dim": float("nan"),
+            "line_search_effective_rank": float("nan"),
+            "line_search_feasible_count": -1,
+            "line_search_self_cov_rel_tol": float(args.line_search_self_cov_rel_tol),
+            "line_search_self_cov_abs_tol": float(args.line_search_self_cov_abs_tol),
+            "line_search_rank_rel_tol": float(args.line_search_rank_rel_tol),
+            "line_search_rank_abs_tol": float(args.line_search_rank_abs_tol),
+            "line_search_min_bt_gain": float(args.line_search_min_bt_gain),
+            "before_bt_total_per_dim": before_bt["bt_total_per_dim"],
+            "after_bt_total_per_dim": after_bt["bt_total_per_dim"],
+            "delta_bt_total_per_dim": after_bt["bt_total_per_dim"] - before_bt["bt_total_per_dim"],
+            "after_test_bt_total_per_dim": after_test_bt["bt_total_per_dim"],
+            "before_corr_diag_mean": before_bt["corr_diag_mean"],
+            "after_corr_diag_mean": after_bt["corr_diag_mean"],
+            "after_test_corr_diag_mean": after_test_bt["corr_diag_mean"],
+            "after_corr_nuclear_per_dim": after_bt["corr_nuclear_per_dim"],
+            "after_corr_singular_max": after_bt["corr_singular_max"],
+            "after_corr_singular_effective_rank": after_bt["corr_singular_effective_rank"],
+            "after_corr_trace_to_nuclear": after_bt["corr_trace_to_nuclear"],
+            "after_test_corr_nuclear_per_dim": after_test_bt["corr_nuclear_per_dim"],
+            "after_test_corr_trace_to_nuclear": after_test_bt["corr_trace_to_nuclear"],
+            "before_shared_diff_ratio": before_sd["shared_diff_ratio"],
+            "after_shared_diff_ratio": after_sd["shared_diff_ratio"],
+            "target_norm": float(torch.linalg.vector_norm(target).detach().cpu().item()),
+            "achieved_norm": float(torch.linalg.vector_norm(achieved).detach().cpu().item()),
+            "actual_corr_delta_norm": float(torch.linalg.vector_norm(actual_corr_delta).detach().cpu().item()),
+            "fd_corr_delta_norm": float(torch.linalg.vector_norm(fd_corr_delta).detach().cpu().item()),
+            "target_diag_delta_mean": float(torch.diagonal(target).mean().detach().cpu().item()),
+            "achieved_diag_delta_mean": float(torch.diagonal(achieved).mean().detach().cpu().item()),
+            "actual_corr_diag_delta_mean": float(torch.diagonal(actual_corr_delta).mean().detach().cpu().item()),
+            "fd_corr_diag_delta_mean": float(torch.diagonal(fd_corr_delta).mean().detach().cpu().item()),
+            "linearized_target_cosine": cosine_matrix(achieved, target),
+            "linearized_target_r2": relative_r2(achieved, target),
+            "fd_delta_target_cosine": cosine_matrix(fd_corr_delta, target),
+            "fd_delta_achieved_cosine": cosine_matrix(fd_corr_delta, achieved),
+            "fd_delta_vs_achieved_r2": relative_r2(fd_corr_delta, achieved),
+            "actual_delta_target_cosine": cosine_matrix(actual_corr_delta, target),
+            "actual_delta_achieved_cosine": cosine_matrix(actual_corr_delta, achieved),
+            "actual_delta_vs_achieved_r2": relative_r2(actual_corr_delta, achieved),
+            "before_self_corr_offdiag_per_dim": float(
+                (
+                    0.5 * (self_corr_offdiag_per_dim_torch(view1_before) + self_corr_offdiag_per_dim_torch(view2_before))
+                )
+                .detach()
+                .cpu()
+                .item()
+            ),
+            "after_self_corr_offdiag_per_dim": float(
+                (
+                    0.5 * (self_corr_offdiag_per_dim_torch(view1_tr) + self_corr_offdiag_per_dim_torch(view2_tr))
+                )
+                .detach()
+                .cpu()
+                .item()
+            ),
+            "self1_target_cosine": cosine_matrix(self_achieved1, -eta_layer * offdiag_matrix(self_corr1)),
+            "self2_target_cosine": cosine_matrix(self_achieved2, -eta_layer * offdiag_matrix(self_corr2)),
+            "actual_self1_achieved_cosine": cosine_matrix(actual_self_delta1, self_achieved1),
+            "actual_self2_achieved_cosine": cosine_matrix(actual_self_delta2, self_achieved2),
+            "first_order_predicted_loss_delta_per_dim": float(
+                torch.sum(grad * achieved).detach().cpu().item() / grad.shape[0]
+            ),
+            "first_order_actual_loss_delta_per_dim": float(
+                torch.sum(grad * actual_corr_delta).detach().cpu().item() / grad.shape[0]
+            ),
+            "corr_grad_norm": float(torch.linalg.vector_norm(grad).detach().cpu().item()),
+            "residual_update_over_input_rms": float(
+                (rms_torch(delta_base) / torch.clamp(base_rms_before, min=1e-12)).detach().cpu().item()
+            ),
+            "view1_update_over_input_rms": float(
+                (rms_torch(delta_v1) / torch.clamp(view1_rms_before, min=1e-12)).detach().cpu().item()
+            ),
+            "actual_postnorm_update_over_input_rms": float(
+                (rms_torch(actual_base_update) / torch.clamp(base_rms_before, min=1e-12)).detach().cpu().item()
+            ),
+            "actual_view1_postnorm_update_over_input_rms": float(
+                (rms_torch(actual_view1_update) / torch.clamp(view1_rms_before, min=1e-12)).detach().cpu().item()
+            ),
+            "update_input_row_cosine": row_cosine_torch(delta_base, base_before),
+            "actual_postnorm_update_input_row_cosine": row_cosine_torch(actual_base_update, base_before),
+        }
+        row.update(candidate["solve"])
+        row.update({f"after_{key}": value for key, value in covariance_spectrum(train_np).items()})
+        row.update({f"after_{key}": value for key, value in agreement_spectrum_metrics(v1_np, v2_np, args, device).items()})
+        if prev_train_np is None:
+            row.update(
+                {
+                    "prev_to_cur_cka": float("nan"),
+                    "prev_to_cur_forward_r2": float("nan"),
+                    "prev_to_cur_reverse_r2": float("nan"),
+                    "prev_to_cur_sym_r2": float("nan"),
+                    "prev_to_cur_linear_novelty": float("nan"),
+                }
+            )
+        else:
+            row.update(transition_metrics(prev_train_np, train_np, args, device))
+        prev_train_np = train_np
+        rows.append(row)
+
+    return {
+        "pathnorm_train": path_train,
+        "pathnorm_test": path_test,
+        "pathnorm_view1_train": path_view1,
+        "pathnorm_view2_train": path_view2,
+        "pathnorm_view1_test": path_view1_test,
+        "pathnorm_view2_test": path_view2_test,
+        "rows": rows,
+    }
+
+
 def run_variant(args, point, tensors, variant, device):
+    if args.branch_post_gain_floor_adaptive_path:
+        return run_variant_adaptive_gain_floor(args, point, tensors, variant, device)
     if args.residual_normalization != "layernorm" and float(args.layernorm_kinetic_weight) > 0.0:
         raise ValueError("--layernorm-kinetic-weight requires --residual-normalization layernorm")
     if args.residual_normalization == "layernorm":
@@ -2561,6 +3329,12 @@ def summarize(mech_rows, readout_summaries):
                 "mean_branch_post_mean_gain": safe_nanmean([row["branch_post_mean_gain"] for row in rows]),
                 "mean_branch_post_min_gain": safe_nanmean([row["branch_post_min_gain"] for row in rows]),
                 "mean_branch_post_gain_floor": safe_nanmean([row["branch_post_gain_floor"] for row in rows]),
+                "mean_branch_post_gain_floor_adaptive_feasible_count": safe_nanmean(
+                    [row.get("branch_post_gain_floor_adaptive_feasible_count", float("nan")) for row in rows]
+                ),
+                "mean_branch_post_gain_floor_adaptive_selected_feasible": safe_nanmean(
+                    [row.get("branch_post_gain_floor_adaptive_selected_feasible", float("nan")) for row in rows]
+                ),
                 "mean_branch_post_max_delta": safe_nanmean([row["branch_post_max_delta"] for row in rows]),
                 "mean_branch_post_reach_score_mean": safe_nanmean(
                     [row["branch_post_reach_score_mean"] for row in rows]
@@ -2831,6 +3605,14 @@ def main():
     parser.add_argument("--branch-post-transform", choices=["none", "cf_shrink", "whiten", "grad_reach"], default="none")
     parser.add_argument("--branch-post-invariance", type=float, default=1.0)
     parser.add_argument("--branch-post-gain-floor", type=float, default=0.0)
+    parser.add_argument("--branch-post-gain-floor-adaptive-path", type=float, nargs="+", default=[])
+    parser.add_argument(
+        "--branch-post-gain-floor-adaptive-rule",
+        choices=["descent", "progress_fraction"],
+        default="descent",
+    )
+    parser.add_argument("--branch-post-gain-floor-adaptive-margin", type=float, default=0.0)
+    parser.add_argument("--branch-post-gain-floor-adaptive-progress-fraction", type=float, default=0.5)
     parser.add_argument("--branch-post-dim", type=int, default=0)
     parser.add_argument("--branch-post-cov-ridge", type=float, default=1e-4)
     parser.add_argument("--branch-mode-balance-power", type=float, default=0.0)
