@@ -1,5 +1,35 @@
 # Progress
 
+- EXPERIMENT/ANALYSIS (2026-06-28 07:18 CEST): Tested the first
+  mode-specific preservation mechanism after rank/nuclear scalar failures.
+  The new optional solver term protects selected current modes during the same
+  closed-form moment-OLS update:
+  \(\|L_\Phi(B)-T_{\mathrm{BT}}\|^2+\gamma\|\Phi B U\|^2\), where \(U\) is
+  either low paired-difference agreement modes from the generalized
+  \((\Delta,\Sigma)\) problem or top shared-PCA modes. This is a natural
+  "mode continuation" version of preservation, not label supervision. I also
+  fixed the agreement-basis eigensolve to use float64 and clamp PSD
+  eigenvalues after an initial run exposed negative generalized deltas. The
+  result is mostly negative but useful. On CIFAR depth 12 with the nuclear
+  selector, agreement-stable preservation improved invariant statistics
+  (`0.3420/0.3579` -> `0.3379/0.3569`) and rank (`19.9 -> 21.3`) but did not
+  recover all-PCA (`0.1902 -> 0.1912`, still below adaptive-fraction
+  `0.1934`). PCA-mode preservation preserved a better single layer
+  (`best 0.1802`) but hurt all-PCA (`0.1884`) and BT (`0.3439/0.3607`).
+  Tiny depth 12 agreement-stable likewise improved BT
+  (`0.5867/0.6252` -> `0.5856/0.6220`) and last-layer readout
+  (`0.0606 -> 0.0628`) but left all-PCA stuck at `0.0650`. Interpretation:
+  mode-specific preservation is the right class of mechanism, but the obvious
+  unsupervised bases are insufficient. Low-difference modes bias toward
+  invariant compression; high-variance PCA modes can preserve individual-layer
+  signal but do not preserve all-layer composition. The next object needs to
+  estimate mode utility/continuation more directly, not by invariance,
+  variance, rank, or nuclear mass alone. Artifacts:
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_cifar100_oldspan_nuclear095_stable128_w1_f64_ls_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_cifar100_oldspan_nuclear095_stablepca128_w1_ls_d12_b1024/`,
+  and
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_oldspan_nuclear095_stable128_w1_ls_d12_b1024/`.
+
 - EXPERIMENT/ANALYSIS (2026-06-28 06:59 CEST): Tested the next natural
   extension of adaptive old-span selection: replace the endpoint-heavy
   `95%` train-BT rule with smoother or more invariant-aware local statistics.

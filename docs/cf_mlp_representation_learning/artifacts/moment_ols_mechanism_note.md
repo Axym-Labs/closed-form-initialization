@@ -427,6 +427,24 @@ discarding or failing to preserve modes that are class-useful under the linear
 probe. The next mechanism has to say which modes should survive or be refined,
 not merely how much rank, BT, or nuclear mass to keep.
 
+The first mode-specific preservation test confirms that this is the right
+question but not yet the right answer. Adding
+\(\gamma\|\Phi B U\|^2\), where \(U\) is a selected current-mode basis,
+keeps the update in the same closed-form OLS framework. Two natural choices
+were tested. Low paired-difference agreement modes improve invariant
+statistics but do not recover all-layer readout: CIFAR depth 12 nuclear-score
+BT improves from `0.3420/0.3579` to `0.3379/0.3569`, but all-PCA only moves
+`0.1902 -> 0.1912`, below adaptive-fraction `0.1934`. Top shared-PCA modes
+preserve a better single layer (`best 0.1802`) but hurt all-PCA (`0.1884`).
+Tiny behaves similarly: agreement-mode preservation improves BT and last-layer
+readout slightly but leaves all-PCA unchanged.
+
+So preservation cannot mean "protect invariant modes" or "protect high-variance
+modes" alone. The missing object is closer to mode utility or mode
+continuation: which directions should remain linearly recoverable because they
+support future/all-layer representations, while nuisance directions can be
+compressed away. This is the next natural abstraction to formalize.
+
 This suggests that SGD's advantage here may not be mystical multi-layer credit
 assignment. It may be partly a spectral exploration / mode-selection mechanism:
 minibatch gradients do not keep selecting exactly the same global leading
@@ -514,6 +532,12 @@ moment directions.
     invariant statistics but still hurts all-PCA. Rank-preserving line search
     throttles the update and fails. The missing object is mode allocation, not
     another scalar proxy for compression.
+
+17. Simple mode-specific preservation is not enough. Agreement-stable modes
+    and PCA modes are both natural unsupervised candidates, but agreement modes
+    mostly protect invariant compression and PCA modes protect some individual
+    layer signal without preserving all-layer composition. Future preservation
+    needs a mode-utility or continuation statistic.
 
 ## Next Mechanism Candidates
 
@@ -622,6 +646,14 @@ moment directions.
     low-order operator that couples BT gain to a linear-retention or
     mode-continuation condition. A scalar rank floor is too crude; the
     preservation object must be mode-specific.
+
+15. **Infer mode utility from trajectories.**
+    The next concrete route is to estimate which modes remain useful across
+    layers in residual BP-BT or greedy BP-BT, then match those statistics with
+    a closed-form rule. Candidate unsupervised proxies include persistence of a
+    mode under subsequent layers, contribution to all-layer PCA variance after
+    whitening, and cross-view nuclear gain conditioned on recoverability. The
+    key is to derive a statistic, not port BP weights.
 
 Batch ensemble moment OLS should be deprioritized as a representation fix:
 the K=2/K=4 tests improved BT but reduced rank/readout.

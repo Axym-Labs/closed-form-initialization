@@ -215,6 +215,63 @@ def project_features_onto_reference(reference, features, ridge):
     }
 
 
+def stable_mode_basis(view1, view2, count, ridge, max_delta, kind):
+    if int(count) <= 0:
+        return None, {
+            "stable_mode_count": 0,
+            "stable_mode_mean_delta": float("nan"),
+            "stable_mode_max_delta": float("nan"),
+        }
+    out_dtype = view1.dtype
+    h1 = center_torch(view1).to(dtype=torch.float64)
+    h2 = center_torch(view2).to(dtype=torch.float64)
+    n = float(h1.shape[0])
+    dim = h1.shape[1]
+    sigma = 0.5 * ((h1.T @ h1) / n + (h2.T @ h2) / n)
+    diff = h1 - h2
+    delta = (diff.T @ diff) / n
+    sigma = 0.5 * (sigma + sigma.T)
+    delta = 0.5 * (delta + delta.T)
+    evals_sigma, evecs_sigma = torch.linalg.eigh(sigma)
+    if kind == "pca":
+        order = torch.argsort(evals_sigma, descending=True)[: min(int(count), dim)]
+        basis = evecs_sigma[:, order]
+        denom = torch.sum(basis * (sigma @ basis), dim=0)
+        selected = torch.sum(basis * (delta @ basis), dim=0) / torch.clamp(denom, min=1e-12)
+        selected = torch.clamp(selected, min=0.0)
+        return basis.to(dtype=out_dtype), {
+            "stable_mode_count": int(order.numel()),
+            "stable_mode_mean_delta": float(torch.mean(selected).detach().cpu().item()),
+            "stable_mode_max_delta": float(torch.max(selected).detach().cpu().item()),
+        }
+    if kind != "agreement":
+        raise ValueError(f"Unknown stable-mode kind: {kind}")
+    evals_sigma = torch.clamp(evals_sigma, min=float(ridge))
+    sigma_inv_sqrt = (evecs_sigma / torch.sqrt(evals_sigma).unsqueeze(0)) @ evecs_sigma.T
+    whitened_delta = sigma_inv_sqrt @ delta @ sigma_inv_sqrt
+    whitened_delta = 0.5 * (whitened_delta + whitened_delta.T)
+    delta_evals, delta_evecs = torch.linalg.eigh(whitened_delta)
+    delta_evals = torch.clamp(delta_evals, min=0.0)
+    order = torch.argsort(delta_evals, descending=False)
+    if float(max_delta) > 0.0:
+        order = order[delta_evals[order] <= float(max_delta)]
+    order = order[: min(int(count), int(order.numel()))]
+    if int(order.numel()) == 0:
+        return None, {
+            "stable_mode_count": 0,
+            "stable_mode_mean_delta": float("nan"),
+            "stable_mode_max_delta": float("nan"),
+        }
+    basis = sigma_inv_sqrt @ delta_evecs[:, order]
+    basis = basis / torch.clamp(torch.linalg.vector_norm(basis, dim=0, keepdim=True), min=1e-12)
+    selected = delta_evals[order]
+    return basis.to(dtype=out_dtype), {
+        "stable_mode_count": int(order.numel()),
+        "stable_mode_mean_delta": float(torch.mean(selected).detach().cpu().item()),
+        "stable_mode_max_delta": float(torch.max(selected).detach().cpu().item()),
+    }
+
+
 def bt_total_per_dim_torch(view1, view2, bt_lambda):
     _, _, corr, _, _, _ = bt_corr_and_gradient(view1, view2, bt_lambda)
     diag = torch.diagonal(corr)
@@ -502,7 +559,10 @@ def normal_operator(b, m1, m2, inv_scale1, inv_scale2, context, rho):
 
 def apply_term_operator(b, term):
     if term.get("type") == "sample":
-        return term["features"] @ b
+        out = term["features"] @ b
+        if "right" in term:
+            out = out @ term["right"]
+        return out
     return apply_moment_operator(
         b,
         term["m1"],
@@ -523,6 +583,15 @@ def effective_old_span_weight(args, penalty, operator_scale):
     if float(args.old_span_update_weight_min) > 0.0 or float(args.old_span_update_weight_max) > 0.0:
         lo = float(args.old_span_update_weight_min) if float(args.old_span_update_weight_min) > 0.0 else 0.0
         hi = float(args.old_span_update_weight_max) if float(args.old_span_update_weight_max) > 0.0 else float("inf")
+        weight = min(max(weight, lo), hi)
+    return weight
+
+
+def effective_stable_mode_weight(args, operator_scale):
+    weight = float(args.stable_mode_penalty) * float(operator_scale)
+    if float(args.stable_mode_weight_min) > 0.0 or float(args.stable_mode_weight_max) > 0.0:
+        lo = float(args.stable_mode_weight_min) if float(args.stable_mode_weight_min) > 0.0 else 0.0
+        hi = float(args.stable_mode_weight_max) if float(args.stable_mode_weight_max) > 0.0 else float("inf")
         weight = min(max(weight, lo), hi)
     return weight
 
@@ -598,6 +667,8 @@ def select_old_span_candidate(candidates, before_score, args):
 
 def adjoint_term_operator(e, term):
     if term.get("type") == "sample":
+        if "right" in term:
+            return (term["features"].T @ e @ term["right"].T) / float(term["features"].shape[0])
         return (term["features"].T @ e) / float(term["features"].shape[0])
     return adjoint_moment_operator(
         e,
@@ -784,6 +855,8 @@ def run_variant(args, point, tensors, variant, device):
         sample_target_metrics = []
         old_span_metrics = []
         old_span_effective_weights = []
+        stable_mode_metrics = []
+        stable_mode_effective_weights = []
         for fit_idx, idx_fit in enumerate(idx_fits):
             if idx_fit is None:
                 view1_fit = view1_tr
@@ -956,6 +1029,78 @@ def run_variant(args, point, tensors, variant, device):
                         old_term2_i,
                     ]
                 )
+            if float(args.stable_mode_penalty) > 0.0 and int(args.stable_mode_count) > 0:
+                stable_basis_i, stable_metrics_i = stable_mode_basis(
+                    view1_fit,
+                    view2_fit,
+                    args.stable_mode_count,
+                    args.stable_mode_ridge,
+                    args.stable_mode_max_delta,
+                    args.stable_mode_kind,
+                )
+                stable_mode_metrics.append(stable_metrics_i)
+                if stable_basis_i is not None:
+                    stable_term1_i = {
+                        "type": "sample",
+                        "name": "stable_mode_view1",
+                        "weight": fit_weight * float(args.stable_mode_penalty),
+                        "features": phi_v1_fit,
+                        "right": stable_basis_i,
+                        "target": torch.zeros(
+                            (view1_fit.shape[0], stable_basis_i.shape[1]),
+                            dtype=view1_fit.dtype,
+                            device=view1_fit.device,
+                        ),
+                        "stable_mode_term": True,
+                        "stable_mode_fit_weight": fit_weight,
+                        "stable_mode_operator_scale": 1.0,
+                    }
+                    stable_term2_i = {
+                        "type": "sample",
+                        "name": "stable_mode_view2",
+                        "weight": fit_weight * float(args.stable_mode_penalty),
+                        "features": phi_v2_fit,
+                        "right": stable_basis_i,
+                        "target": torch.zeros(
+                            (view2_fit.shape[0], stable_basis_i.shape[1]),
+                            dtype=view2_fit.dtype,
+                            device=view2_fit.device,
+                        ),
+                        "stable_mode_term": True,
+                        "stable_mode_fit_weight": fit_weight,
+                        "stable_mode_operator_scale": 1.0,
+                    }
+                    stable_operator_scale = 1.0
+                    if args.stable_mode_normalization == "operator":
+                        gen = torch.Generator(device=view1_tr.device)
+                        gen.manual_seed(
+                            int(point.seed)
+                            + 49979687 * (int(layer_idx) + 1)
+                            + 67867967 * (int(fit_idx) + 1)
+                        )
+                        probe = torch.randn(
+                            (phi_v1_fit.shape[1], z1_i.shape[1]),
+                            generator=gen,
+                            dtype=z1_i.dtype,
+                            device=z1_i.device,
+                        )
+                        moment_energy = term_probe_energy(bt_term_i, probe)
+                        stable_energy = 0.5 * (
+                            term_probe_energy(stable_term1_i, probe)
+                            + term_probe_energy(stable_term2_i, probe)
+                        )
+                        stable_operator_scale = float(
+                            (moment_energy / torch.clamp(stable_energy, min=1e-12)).detach().cpu().item()
+                        )
+                    elif args.stable_mode_normalization != "none":
+                        raise ValueError(f"Unknown stable-mode normalization: {args.stable_mode_normalization}")
+                    stable_weight = effective_stable_mode_weight(args, stable_operator_scale)
+                    stable_term1_i["stable_mode_operator_scale"] = stable_operator_scale
+                    stable_term2_i["stable_mode_operator_scale"] = stable_operator_scale
+                    stable_term1_i["weight"] = fit_weight * stable_weight
+                    stable_term2_i["weight"] = fit_weight * stable_weight
+                    stable_mode_effective_weights.append(stable_weight)
+                    terms.extend([stable_term1_i, stable_term2_i])
             self_corr1_i = (z1_i.T @ z1_i) / float(z1_i.shape[0])
             self_corr2_i = (z2_i.T @ z2_i) / float(z2_i.shape[0])
             if float(args.self_cov_weight) > 0.0:
@@ -1021,8 +1166,22 @@ def run_variant(args, point, tensors, variant, device):
             old_span_summary = {
                 "old_span_feature_projection_energy_fraction": float("nan"),
             }
+        if stable_mode_metrics:
+            stable_mode_summary = {
+                key: float(np.mean([item[key] for item in stable_mode_metrics]))
+                for key in stable_mode_metrics[0]
+            }
+        else:
+            stable_mode_summary = {
+                "stable_mode_count": 0,
+                "stable_mode_mean_delta": float("nan"),
+                "stable_mode_max_delta": float("nan"),
+            }
         old_span_effective_weight = (
             float(np.mean(old_span_effective_weights)) if old_span_effective_weights else float("nan")
+        )
+        stable_mode_effective_weight = (
+            float(np.mean(stable_mode_effective_weights)) if stable_mode_effective_weights else float("nan")
         )
         old_span_selected_penalty = float(args.old_span_update_penalty)
         old_span_adaptive_before_bt = float("nan")
@@ -1356,6 +1515,18 @@ def run_variant(args, point, tensors, variant, device):
             "sample_mode_balance_eps": float(args.sample_mode_balance_eps),
             "sample_mode_balance_min_gain": float(args.sample_mode_balance_min_gain),
             "sample_mode_balance_max_gain": float(args.sample_mode_balance_max_gain),
+            "stable_mode_penalty": float(args.stable_mode_penalty),
+            "stable_mode_count_requested": int(args.stable_mode_count),
+            "stable_mode_kind": args.stable_mode_kind,
+            "stable_mode_count": stable_mode_summary["stable_mode_count"],
+            "stable_mode_ridge": float(args.stable_mode_ridge),
+            "stable_mode_max_delta_threshold": float(args.stable_mode_max_delta),
+            "stable_mode_mean_delta": stable_mode_summary["stable_mode_mean_delta"],
+            "stable_mode_max_delta": stable_mode_summary["stable_mode_max_delta"],
+            "stable_mode_normalization": args.stable_mode_normalization,
+            "stable_mode_effective_weight": stable_mode_effective_weight,
+            "stable_mode_weight_min": float(args.stable_mode_weight_min),
+            "stable_mode_weight_max": float(args.stable_mode_weight_max),
             "old_span_update_penalty": float(args.old_span_update_penalty),
             "old_span_update_ridge": float(args.old_span_update_ridge),
             "old_span_update_normalization": args.old_span_update_normalization,
@@ -1617,6 +1788,15 @@ def summarize(mech_rows, readout_summaries):
                 "mean_old_span_adaptive_selected_score": safe_nanmean(
                     [row["old_span_adaptive_selected_score"] for row in rows]
                 ),
+                "mean_stable_mode_count": safe_nanmean(
+                    [row["stable_mode_count"] for row in rows]
+                ),
+                "mean_stable_mode_mean_delta": safe_nanmean(
+                    [row["stable_mode_mean_delta"] for row in rows]
+                ),
+                "mean_stable_mode_effective_weight": safe_nanmean(
+                    [row["stable_mode_effective_weight"] for row in rows]
+                ),
                 "final_effective_rank": final["after_effective_rank"],
                 "mean_linear_novelty": float(np.nanmean([row["prev_to_cur_linear_novelty"] for row in rows])),
                 "last_layer_accuracy": readout.get("last_layer_accuracy", float("nan")),
@@ -1760,6 +1940,14 @@ def main():
     parser.add_argument("--sample-mode-balance-eps", type=float, default=1e-3)
     parser.add_argument("--sample-mode-balance-min-gain", type=float, default=0.0)
     parser.add_argument("--sample-mode-balance-max-gain", type=float, default=0.0)
+    parser.add_argument("--stable-mode-penalty", type=float, default=0.0)
+    parser.add_argument("--stable-mode-kind", choices=["agreement", "pca"], default="agreement")
+    parser.add_argument("--stable-mode-count", type=int, default=128)
+    parser.add_argument("--stable-mode-ridge", type=float, default=1e-3)
+    parser.add_argument("--stable-mode-max-delta", type=float, default=0.0)
+    parser.add_argument("--stable-mode-normalization", choices=["none", "operator"], default="operator")
+    parser.add_argument("--stable-mode-weight-min", type=float, default=0.0)
+    parser.add_argument("--stable-mode-weight-max", type=float, default=0.0)
     parser.add_argument("--old-span-update-penalty", type=float, default=0.0)
     parser.add_argument("--old-span-update-ridge", type=float, default=1e-3)
     parser.add_argument("--old-span-update-normalization", choices=["none", "operator"], default="none")
