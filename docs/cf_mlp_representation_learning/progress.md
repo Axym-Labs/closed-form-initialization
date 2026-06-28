@@ -1,5 +1,36 @@
 # Progress
 
+- EXPERIMENT/ANALYSIS (2026-06-28 10:05 CEST): Replaced the loose
+  branch-scan direction with a mechanism-first residual trust-region test. I
+  added a `layernorm_sample` operator to the moment-OLS solver and a
+  `--layernorm-kinetic-weight` term that penalizes the first-order
+  LayerNorm-manifold displacement
+  \(\|J_{\mathrm{LN},H}\Phi B\|^2\) inside the same normal equations as the
+  BT-correlation target. The new operator passed a CUDA adjoint check
+  (`abs_err = 8.3e-7`). On the previous coherent LayerNorm residual setup
+  (CIFAR100/SimCLR, width 512, depth 12, K=4 moment batches, random nonlinear
+  branch, post-activation paired CF transform, exact BT-quadratic scaling),
+  kinetic weight `1` behaved as intended locally but did not solve the
+  representation problem: no-kinetic `0.3846/0.4002` train/test BT,
+  rank `15.64`, agreement-rank `64.38`, update `0.262`, all-PCA `0.1814`;
+  kinetic `0.3821/0.3978`, rank `15.50`, agreement-rank `60.74`, update
+  `0.236`, all-PCA `0.1830`. Therefore excessive LayerNorm-manifold step
+  size is not the main failure. I then added a post-activation `whiten`
+  branch transform to isolate the branch metric. Whitening preserved breadth
+  (`rank 45.83`, agreement-rank around `213-221`) but the full-train
+  BT-quadratic guard vetoed every layer because the realized first-order BT
+  term was positive (`~+0.087` to `+0.089`). A weaker paired-shrink setting
+  (`branch_post_invariance=0.25`) was also fully vetoed. Current exact
+  failure: broad/no-shrink nonlinear branch cones are not globally
+  BT-descending, while sufficiently strong paired CF shrink gives descent by
+  concentrating the paired-difference spectrum. This is the opposite of
+  greedy residual BP-BT, which keeps agreement effective rank around
+  `360-475` while improving BT. The next viable formulation should choose the
+  branch metric by a descent-constrained breadth principle: use the least
+  destructive branch transform whose realized residual moment-OLS step has
+  negative full-train BT first-order change. Detailed note:
+  `docs/cf_mlp_representation_learning/artifacts/residual_gradient_trust_region_failure_note.md`.
+
 - EXPERIMENT/ANALYSIS (2026-06-28 09:10 CEST): Continued the
   LayerNorm residual-flow branch-dictionary work and found the first coherent
   LayerNorm CF-BT trajectory. The failed `grad_reach` branch clarified the

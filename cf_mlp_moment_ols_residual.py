@@ -16,7 +16,7 @@ from cf_mlp_layer_mechanistic import covariance_spectrum, standardize_many
 from cf_mlp_residual_barlow import leaky_gelu
 from cf_mlp_residual_bt_variants import fit_cf_transform_with_prior_torch
 from cf_mlp_scalability import SweepPoint, write_jsonl
-from cf_mlp_scalability_gpu import fit_cf_transform_torch, normalize_hidden_with_stats_torch
+from cf_mlp_scalability_gpu import fit_cf_transform_torch, fit_whitening_transform_torch, normalize_hidden_with_stats_torch
 
 
 def point_for(args, depth, seed):
@@ -624,6 +624,27 @@ def branch_post_transform_features(args, current_train, branch_train, branch_tes
             }
         )
         return transformed_train, transformed_test, metrics
+    if args.branch_post_transform == "whiten":
+        fitted = fit_whitening_transform_torch(
+            branch_train[1],
+            branch_train[2],
+            branch_train[1].shape[1],
+        )
+        transform = fitted["transform"]
+        transformed_train = [arr @ transform for arr in branch_train]
+        transformed_test = [arr @ transform for arr in branch_test]
+        transformed_train, transformed_test, _, _ = normalize_hidden_with_stats_torch(
+            transformed_train,
+            transformed_test,
+        )
+        metrics.update(
+            {
+                "branch_post_mean_gain": fitted["mean_gain"],
+                "branch_post_min_gain": fitted["min_gain"],
+                "branch_post_max_delta": fitted["max_whitened_delta"],
+            }
+        )
+        return transformed_train, transformed_test, metrics
     if args.branch_post_transform == "grad_reach":
         transform, reach_metrics = grad_reach_branch_transform(args, current_train, branch_train)
         transformed_train = [arr @ transform for arr in branch_train]
@@ -859,6 +880,13 @@ def apply_layernorm_moment_operator(b, term):
     return (dz1.T @ term["z2"] + term["z1"].T @ dz2) / n
 
 
+def apply_layernorm_sample_operator(b, term):
+    out = row_layernorm_tangent(term["features"] @ b, term["reference"], term["layernorm_eps"])
+    if "right" in term:
+        out = out @ term["right"]
+    return out
+
+
 def adjoint_moment_operator(e, m1, m2, inv_scale1, inv_scale2, context):
     grad = (m1 @ e.T) * inv_scale1.unsqueeze(0) + (m2.T @ e) * inv_scale2.unsqueeze(0)
     if context["mode"] == "projected":
@@ -881,6 +909,14 @@ def adjoint_layernorm_moment_operator(e, term):
     return term["phi1"].T @ grad_u1 + term["phi2"].T @ grad_u2
 
 
+def adjoint_layernorm_sample_operator(e, term):
+    back = e
+    if "right" in term:
+        back = back @ term["right"].T
+    back = row_layernorm_tangent(back, term["reference"], term["layernorm_eps"])
+    return (term["features"].T @ back) / float(term["features"].shape[0])
+
+
 def normal_operator(b, m1, m2, inv_scale1, inv_scale2, context, rho):
     e = apply_moment_operator(b, m1, m2, inv_scale1, inv_scale2, context)
     return adjoint_moment_operator(e, m1, m2, inv_scale1, inv_scale2, context) + float(rho) * b
@@ -889,6 +925,8 @@ def normal_operator(b, m1, m2, inv_scale1, inv_scale2, context, rho):
 def apply_term_operator(b, term):
     if term.get("type") == "moment_layernorm":
         return apply_layernorm_moment_operator(b, term)
+    if term.get("type") == "layernorm_sample":
+        return apply_layernorm_sample_operator(b, term)
     if term.get("type") in {"sample", "sample_tangent"}:
         out = term["features"] @ b
         if term.get("type") == "sample_tangent":
@@ -1001,6 +1039,8 @@ def select_old_span_candidate(candidates, before_score, args):
 def adjoint_term_operator(e, term):
     if term.get("type") == "moment_layernorm":
         return adjoint_layernorm_moment_operator(e, term)
+    if term.get("type") == "layernorm_sample":
+        return adjoint_layernorm_sample_operator(e, term)
     if term.get("type") == "sample":
         if "right" in term:
             return (term["features"].T @ e @ term["right"].T) / float(term["features"].shape[0])
@@ -1201,6 +1241,41 @@ def stable_mode_update_diagnostics(
     return out
 
 
+def make_layernorm_kinetic_terms(args, fit_weight, layer_idx, fit_idx, seed, bt_term, streams, solve_shape, dtype, device):
+    raw_terms = []
+    for name, features, reference in streams:
+        raw_terms.append(
+            {
+                "type": "layernorm_sample",
+                "name": f"layernorm_kinetic_{name}",
+                "weight": 0.0,
+                "features": features,
+                "reference": reference,
+                "layernorm_eps": float(args.layernorm_eps),
+                "target": torch.zeros_like(reference),
+            }
+        )
+    operator_scale = 1.0
+    if args.layernorm_kinetic_normalization == "operator":
+        gen = torch.Generator(device=device)
+        gen.manual_seed(int(seed) + 67867979 * (int(layer_idx) + 1) + 86028121 * (int(fit_idx) + 1))
+        probe = torch.randn(solve_shape, generator=gen, dtype=dtype, device=device)
+        moment_energy = term_probe_energy(bt_term, probe)
+        kinetic_energy = torch.mean(torch.stack([term_probe_energy(term, probe) for term in raw_terms]))
+        operator_scale = float((moment_energy / torch.clamp(kinetic_energy, min=1e-12)).detach().cpu().item())
+    elif args.layernorm_kinetic_normalization != "none":
+        raise ValueError(f"Unknown LayerNorm kinetic normalization: {args.layernorm_kinetic_normalization}")
+    effective_weight = float(args.layernorm_kinetic_weight) * operator_scale
+    per_term_weight = fit_weight * effective_weight / max(1, len(raw_terms))
+    for term in raw_terms:
+        term["weight"] = per_term_weight
+    return raw_terms, {
+        "layernorm_kinetic_stream_count": len(raw_terms),
+        "layernorm_kinetic_operator_scale": operator_scale,
+        "layernorm_kinetic_effective_weight": effective_weight,
+    }
+
+
 def shared_difference_metrics(view1, view2):
     x1 = np.asarray(view1, dtype=np.float64)
     x2 = np.asarray(view2, dtype=np.float64)
@@ -1229,6 +1304,8 @@ def numpy_path(train, test, view1, view2):
 
 
 def run_variant(args, point, tensors, variant, device):
+    if args.residual_normalization != "layernorm" and float(args.layernorm_kinetic_weight) > 0.0:
+        raise ValueError("--layernorm-kinetic-weight requires --residual-normalization layernorm")
     if args.residual_normalization == "layernorm":
         unsupported = []
         if float(args.sample_gradient_weight) > 0.0:
@@ -1306,15 +1383,20 @@ def run_variant(args, point, tensors, variant, device):
         old_span_effective_weights = []
         stable_mode_metrics = []
         stable_mode_effective_weights = []
+        layernorm_kinetic_metrics = []
         for fit_idx, idx_fit in enumerate(idx_fits):
             if idx_fit is None:
+                base_fit = base_tr
                 view1_fit = view1_tr
                 view2_fit = view2_tr
+                phi_base_fit = phi_base
                 phi_v1_fit = phi_v1
                 phi_v2_fit = phi_v2
             else:
+                base_fit = base_tr[idx_fit]
                 view1_fit = view1_tr[idx_fit]
                 view2_fit = view2_tr[idx_fit]
+                phi_base_fit = phi_base[idx_fit]
                 phi_v1_fit = phi_v1[idx_fit]
                 phi_v2_fit = phi_v2[idx_fit]
             z1_i, z2_i, corr_i, grad_i, scale1_i, scale2_i = bt_corr_and_gradient(view1_fit, view2_fit, args.bt_lambda)
@@ -1356,6 +1438,27 @@ def run_variant(args, point, tensors, variant, device):
                     "target": target_i,
                 }
             terms.append(bt_term_i)
+            if float(args.layernorm_kinetic_weight) > 0.0:
+                kinetic_streams = [
+                    ("view1", phi_v1_fit, view1_fit),
+                    ("view2", phi_v2_fit, view2_fit),
+                ]
+                if args.layernorm_kinetic_include_base:
+                    kinetic_streams.insert(0, ("base", phi_base_fit, base_fit))
+                kinetic_terms, kinetic_metrics_i = make_layernorm_kinetic_terms(
+                    args,
+                    fit_weight,
+                    layer_idx,
+                    fit_idx,
+                    point.seed,
+                    bt_term_i,
+                    kinetic_streams,
+                    (phi_v1.shape[1], view1_tr.shape[1]),
+                    view1_tr.dtype,
+                    view1_tr.device,
+                )
+                layernorm_kinetic_metrics.append(kinetic_metrics_i)
+                terms.extend(kinetic_terms)
             if float(args.sample_gradient_weight) > 0.0:
                 sample_target1_i, sample_target2_i = activation_gradient_targets(
                     z1_i,
@@ -1660,6 +1763,17 @@ def run_variant(args, point, tensors, variant, device):
                 "stable_mode_count": 0,
                 "stable_mode_mean_delta": float("nan"),
                 "stable_mode_max_delta": float("nan"),
+            }
+        if layernorm_kinetic_metrics:
+            layernorm_kinetic_summary = {
+                key: float(np.mean([item[key] for item in layernorm_kinetic_metrics]))
+                for key in layernorm_kinetic_metrics[0]
+            }
+        else:
+            layernorm_kinetic_summary = {
+                "layernorm_kinetic_stream_count": 0,
+                "layernorm_kinetic_operator_scale": float("nan"),
+                "layernorm_kinetic_effective_weight": float("nan"),
             }
         old_span_effective_weight = (
             float(np.mean(old_span_effective_weights)) if old_span_effective_weights else float("nan")
@@ -2066,6 +2180,12 @@ def run_variant(args, point, tensors, variant, device):
             "width": point.width,
             "residual_normalization": args.residual_normalization,
             "layernorm_eps": float(args.layernorm_eps),
+            "layernorm_kinetic_weight": float(args.layernorm_kinetic_weight),
+            "layernorm_kinetic_normalization": args.layernorm_kinetic_normalization,
+            "layernorm_kinetic_include_base": bool(args.layernorm_kinetic_include_base),
+            "layernorm_kinetic_stream_count": layernorm_kinetic_summary["layernorm_kinetic_stream_count"],
+            "layernorm_kinetic_operator_scale": layernorm_kinetic_summary["layernorm_kinetic_operator_scale"],
+            "layernorm_kinetic_effective_weight": layernorm_kinetic_summary["layernorm_kinetic_effective_weight"],
             "branch_dim": int(args.branch_dim),
             "branch_feature_dim": int(phi_v1.shape[1]),
             "branch_random_blend": float(args.branch_random_blend),
@@ -2403,6 +2523,12 @@ def summarize(mech_rows, readout_summaries):
                 "mean_actual_postnorm_update_input_row_cosine": float(
                     np.mean([row["actual_postnorm_update_input_row_cosine"] for row in rows])
                 ),
+                "mean_layernorm_kinetic_operator_scale": safe_nanmean(
+                    [row["layernorm_kinetic_operator_scale"] for row in rows]
+                ),
+                "mean_layernorm_kinetic_effective_weight": safe_nanmean(
+                    [row["layernorm_kinetic_effective_weight"] for row in rows]
+                ),
                 "mean_applied_scale": float(np.mean([row["applied_scale"] for row in rows])),
                 "mean_bt_quadratic_scale": safe_nanmean([row["bt_quadratic_scale"] for row in rows]),
                 "mean_bt_quadratic_full_first_order_delta": safe_nanmean(
@@ -2689,11 +2815,14 @@ def main():
     parser.add_argument("--moment-ensembles", type=int, default=1)
     parser.add_argument("--residual-normalization", choices=["feature", "layernorm"], default="feature")
     parser.add_argument("--layernorm-eps", type=float, default=1e-5)
+    parser.add_argument("--layernorm-kinetic-weight", type=float, default=0.0)
+    parser.add_argument("--layernorm-kinetic-normalization", choices=["none", "operator"], default="operator")
+    parser.add_argument("--layernorm-kinetic-include-base", action="store_true")
     parser.add_argument("--max-postnorm-update-ratio", type=float, default=0.0)
     parser.add_argument("--branch-dim", type=int, default=128)
     parser.add_argument("--branch-random-blend", type=float, default=0.0)
     parser.add_argument("--branch-shared-power", type=float, default=0.0)
-    parser.add_argument("--branch-post-transform", choices=["none", "cf_shrink", "grad_reach"], default="none")
+    parser.add_argument("--branch-post-transform", choices=["none", "cf_shrink", "whiten", "grad_reach"], default="none")
     parser.add_argument("--branch-post-invariance", type=float, default=1.0)
     parser.add_argument("--branch-post-dim", type=int, default=0)
     parser.add_argument("--branch-post-cov-ridge", type=float, default=1e-4)
