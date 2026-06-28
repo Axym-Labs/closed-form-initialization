@@ -472,9 +472,90 @@ def _pil_from_chw_float(image, image_module):
     return image_module.fromarray(arr)
 
 
+class _PILSSLTransform:
+    def __init__(self, image_size, policy, view_index):
+        self.image_size = int(image_size)
+        self.policy = policy
+        self.view_index = int(view_index)
+        self.jitter_strength = 0.5 if policy == "simclr_cifar" else 1.0
+
+    def _resample_bicubic(self, image):
+        return getattr(getattr(image, "Resampling", image), "BICUBIC", 3)
+
+    def _random_resized_crop(self, image):
+        width, height = image.size
+        area = float(width * height)
+        log_ratio = (math.log(3.0 / 4.0), math.log(4.0 / 3.0))
+        for _ in range(10):
+            target_area = random.uniform(0.08, 1.0) * area
+            aspect = math.exp(random.uniform(*log_ratio))
+            crop_w = int(round(math.sqrt(target_area * aspect)))
+            crop_h = int(round(math.sqrt(target_area / aspect)))
+            if 0 < crop_w <= width and 0 < crop_h <= height:
+                left = random.randint(0, width - crop_w)
+                top = random.randint(0, height - crop_h)
+                image = image.crop((left, top, left + crop_w, top + crop_h))
+                return image.resize((self.image_size, self.image_size), self._resample_bicubic(image))
+        crop = min(width, height)
+        left = (width - crop) // 2
+        top = (height - crop) // 2
+        image = image.crop((left, top, left + crop, top + crop))
+        return image.resize((self.image_size, self.image_size), self._resample_bicubic(image))
+
+    def _color_jitter(self, image):
+        from PIL import Image, ImageEnhance
+
+        strength = self.jitter_strength
+        factors = [
+            ("brightness", random.uniform(max(0.0, 1.0 - 0.8 * strength), 1.0 + 0.8 * strength)),
+            ("contrast", random.uniform(max(0.0, 1.0 - 0.8 * strength), 1.0 + 0.8 * strength)),
+            ("saturation", random.uniform(max(0.0, 1.0 - 0.8 * strength), 1.0 + 0.8 * strength)),
+            ("hue", random.uniform(-0.2 * strength, 0.2 * strength)),
+        ]
+        random.shuffle(factors)
+        for kind, value in factors:
+            if kind == "brightness":
+                image = ImageEnhance.Brightness(image).enhance(value)
+            elif kind == "contrast":
+                image = ImageEnhance.Contrast(image).enhance(value)
+            elif kind == "saturation":
+                image = ImageEnhance.Color(image).enhance(value)
+            else:
+                hsv = np.asarray(image.convert("HSV"), dtype=np.uint8).copy()
+                hsv[..., 0] = ((hsv[..., 0].astype(np.int16) + int(round(value * 255.0))) % 256).astype(np.uint8)
+                image = Image.fromarray(hsv, mode="HSV").convert("RGB")
+        return image
+
+    def __call__(self, image):
+        from PIL import ImageFilter, ImageOps
+
+        image = self._random_resized_crop(image)
+        if random.random() < 0.5:
+            image = ImageOps.mirror(image)
+        if random.random() < 0.8:
+            image = self._color_jitter(image)
+        if random.random() < 0.2:
+            image = ImageOps.grayscale(image).convert("RGB")
+        if self.policy == "barlow_twins":
+            kernel_size = max(3, int(round(0.1 * self.image_size)))
+            if kernel_size % 2 == 0:
+                kernel_size += 1
+            blur_p = 1.0 if self.view_index == 0 else 0.1
+            if random.random() < blur_p:
+                image = image.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.1, 2.0)))
+            solarize_p = 0.0 if self.view_index == 0 else 0.2
+            if random.random() < solarize_p:
+                image = ImageOps.solarize(image, threshold=128)
+        arr = np.asarray(image, dtype=np.float32) / 255.0
+        return np.transpose(arr, (2, 0, 1)).astype(np.float32)
+
+
 def _ssl_transform(image_size, policy, view_index):
-    from torchvision import transforms
-    from torchvision.transforms import InterpolationMode
+    try:
+        from torchvision import transforms
+        from torchvision.transforms import InterpolationMode
+    except Exception:
+        return _PILSSLTransform(image_size, policy, view_index)
 
     crop = transforms.RandomResizedCrop(
         image_size,
@@ -536,8 +617,11 @@ def ssl_random_crop_color_views(images, seed, policy, view_index):
             torch.manual_seed(sample_seed)
         except Exception:
             pass
-        tensor = transform(_pil_from_chw_float(image, Image))
-        out[idx] = tensor.detach().cpu().numpy().astype(np.float32)
+        augmented = transform(_pil_from_chw_float(image, Image))
+        if hasattr(augmented, "detach"):
+            out[idx] = augmented.detach().cpu().numpy().astype(np.float32)
+        else:
+            out[idx] = np.asarray(augmented, dtype=np.float32)
     return out
 
 

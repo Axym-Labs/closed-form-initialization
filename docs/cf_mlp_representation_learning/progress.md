@@ -1,5 +1,36 @@
 # Progress
 
+- EXPERIMENT/ANALYSIS (2026-06-28 07:52 CEST): Revisited the
+  stable-mode preservation idea instead of discarding it. I added a
+  standardized-tangent sample operator for OLS terms, so preservation can
+  constrain the first-order post-normalization motion
+  \(P_Z((\Phi B)S^{-1})\) rather than raw residual update \(\Phi B\). This
+  fixed a real local mismatch: the tangent stable-mode motion predicts
+  realized selected-mode drift much better than raw motion (full d12 mean
+  tangent/real cosine around `0.95`; smoke `0.99` versus raw `0.79`). But it
+  did not fix representation quality. On full CIFAR100-scale d12 runs using
+  the PIL augmentation fallback, baseline old-span adaptive gave train/test
+  BT `0.3582/0.3594`, rank `9.02`, last/all-PCA `0.1624/0.1690`. Raw stable
+  gave `0.3550/0.3567`, all-PCA `0.1710`; tangent stable at weights `1/5/20`
+  gave all-PCA `0.1702/0.1688/0.1684`, with weight `20` reducing stable-mode
+  drift (`0.0208 -> 0.0180`) but not helping readout. Tangent old-span also
+  failed as a representation fix: it improved actual-predicted local motion
+  (`0.8697 -> 0.9109`) but narrowed rank/readout (`8.69`, all-PCA `0.1686`).
+  The working minor pivot stayed in the gradient-step regime but changed the
+  branch cone: mild linearly novel branch mixing (`mix=0.25`) improved d12 to
+  train/test BT `0.3528/0.3564`, rank `10.04`, last/all-PCA `0.1650/0.1754`.
+  It also composed weakly at d24: baseline `0.3538/0.3558`, all-PCA `0.1712`,
+  last `0.1584`; novelty `0.3484/0.3514`, all-PCA `0.1720`, last `0.1648`.
+  Interpretation: the exact point of failure is not primarily normalization
+  fidelity or a scalar penalty strength. The selected agreement modes are not
+  the useful preservation object, and the current update cone remains too
+  old-span/narrow. The partial fix is cone repair, not stronger preservation.
+  Note: these new runs used the new PIL fallback because compatible
+  `torchvision` was unavailable in the CUDA Torch interpreter, so they should
+  be compared internally rather than used as exact replacements for older
+  torchvision-based artifacts. Detailed note:
+  `docs/cf_mlp_representation_learning/artifacts/tangent_preservation_failure_note.md`.
+
 - EXPERIMENT/ANALYSIS (2026-06-28 07:18 CEST): Tested the first
   mode-specific preservation mechanism after rank/nuclear scalar failures.
   The new optional solver term protects selected current modes during the same

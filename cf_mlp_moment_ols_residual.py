@@ -102,6 +102,16 @@ def standardization_tangent_project(delta_z, z):
     return delta_z - delta_z.mean(dim=0, keepdim=True) - z * torch.mean(z * delta_z, dim=0, keepdim=True)
 
 
+def standardization_tangent_context(reference, eps=1e-4):
+    z, _, scale = standardize_with_stats_torch(reference, eps)
+    inv_scale = 1.0 / torch.clamp(scale.squeeze(0), min=1e-12)
+    return z, inv_scale
+
+
+def apply_standardized_tangent(delta, z, inv_scale):
+    return standardization_tangent_project(delta * inv_scale.unsqueeze(0), z)
+
+
 def mode_balance_delta(delta_z, z, power, eps, min_gain, max_gain):
     if float(power) == 0.0:
         return delta_z
@@ -558,8 +568,10 @@ def normal_operator(b, m1, m2, inv_scale1, inv_scale2, context, rho):
 
 
 def apply_term_operator(b, term):
-    if term.get("type") == "sample":
+    if term.get("type") in {"sample", "sample_tangent"}:
         out = term["features"] @ b
+        if term.get("type") == "sample_tangent":
+            out = apply_standardized_tangent(out, term["reference_z"], term["reference_inv_scale"])
         if "right" in term:
             out = out @ term["right"]
         return out
@@ -670,6 +682,12 @@ def adjoint_term_operator(e, term):
         if "right" in term:
             return (term["features"].T @ e @ term["right"].T) / float(term["features"].shape[0])
         return (term["features"].T @ e) / float(term["features"].shape[0])
+    if term.get("type") == "sample_tangent":
+        back = e
+        if "right" in term:
+            back = back @ term["right"].T
+        back = apply_standardized_tangent(back, term["reference_z"], term["reference_inv_scale"])
+        return (term["features"].T @ back) / float(term["features"].shape[0])
     return adjoint_moment_operator(
         e,
         term["m1"],
@@ -776,6 +794,60 @@ def relative_r2(pred, target):
     err = torch.sum((pred - target) ** 2)
     base = torch.sum(target * target)
     return float((1.0 - err / torch.clamp(base, min=1e-12)).detach().cpu().item())
+
+
+def rms_scalar(x):
+    return float(torch.sqrt(torch.mean(x * x)).detach().cpu().item())
+
+
+def stable_mode_update_diagnostics(
+    view1_before,
+    view2_before,
+    view1_after,
+    view2_after,
+    delta_v1,
+    delta_v2,
+    args,
+):
+    basis, metrics = stable_mode_basis(
+        view1_before,
+        view2_before,
+        args.stable_mode_count,
+        args.stable_mode_ridge,
+        args.stable_mode_max_delta,
+        args.stable_mode_kind,
+    )
+    out = {
+        "stable_mode_diag_count": metrics["stable_mode_count"],
+        "stable_mode_raw_update_rms": float("nan"),
+        "stable_mode_tangent_update_rms": float("nan"),
+        "stable_mode_actual_delta_rms": float("nan"),
+        "stable_mode_raw_actual_cosine": float("nan"),
+        "stable_mode_tangent_actual_cosine": float("nan"),
+    }
+    if basis is None:
+        return out
+    z1_before, inv_scale1 = standardization_tangent_context(view1_before)
+    z2_before, inv_scale2 = standardization_tangent_context(view2_before)
+    raw1 = delta_v1 @ basis
+    raw2 = delta_v2 @ basis
+    tangent1 = apply_standardized_tangent(delta_v1, z1_before, inv_scale1) @ basis
+    tangent2 = apply_standardized_tangent(delta_v2, z2_before, inv_scale2) @ basis
+    actual1 = (standardize_torch(view1_after) - standardize_torch(view1_before)) @ basis
+    actual2 = (standardize_torch(view2_after) - standardize_torch(view2_before)) @ basis
+    raw = torch.cat([raw1, raw2], dim=0)
+    tangent = torch.cat([tangent1, tangent2], dim=0)
+    actual = torch.cat([actual1, actual2], dim=0)
+    out.update(
+        {
+            "stable_mode_raw_update_rms": rms_scalar(raw),
+            "stable_mode_tangent_update_rms": rms_scalar(tangent),
+            "stable_mode_actual_delta_rms": rms_scalar(actual),
+            "stable_mode_raw_actual_cosine": cosine_matrix(raw, actual),
+            "stable_mode_tangent_actual_cosine": cosine_matrix(tangent, actual),
+        }
+    )
+    return out
 
 
 def shared_difference_metrics(view1, view2):
@@ -976,8 +1048,13 @@ def run_variant(args, point, tensors, variant, device):
                         )
                     }
                 )
+                old_span_term_type = (
+                    "sample_tangent" if args.old_span_update_tangent == "view_standardized" else "sample"
+                )
+                old_z1_i, old_inv_scale1_i = standardization_tangent_context(view1_fit)
+                old_z2_i, old_inv_scale2_i = standardization_tangent_context(view2_fit)
                 old_term1_i = {
-                    "type": "sample",
+                    "type": old_span_term_type,
                     "name": "old_span_update_view1",
                     "weight": fit_weight * float(args.old_span_update_penalty),
                     "features": old_phi_v1_i,
@@ -985,9 +1062,11 @@ def run_variant(args, point, tensors, variant, device):
                     "old_span_term": True,
                     "old_span_fit_weight": fit_weight,
                     "old_span_operator_scale": 1.0,
+                    "reference_z": old_z1_i,
+                    "reference_inv_scale": old_inv_scale1_i,
                 }
                 old_term2_i = {
-                    "type": "sample",
+                    "type": old_span_term_type,
                     "name": "old_span_update_view2",
                     "weight": fit_weight * float(args.old_span_update_penalty),
                     "features": old_phi_v2_i,
@@ -995,6 +1074,8 @@ def run_variant(args, point, tensors, variant, device):
                     "old_span_term": True,
                     "old_span_fit_weight": fit_weight,
                     "old_span_operator_scale": 1.0,
+                    "reference_z": old_z2_i,
+                    "reference_inv_scale": old_inv_scale2_i,
                 }
                 old_span_operator_scale = 1.0
                 if args.old_span_update_normalization == "operator":
@@ -1040,8 +1121,13 @@ def run_variant(args, point, tensors, variant, device):
                 )
                 stable_mode_metrics.append(stable_metrics_i)
                 if stable_basis_i is not None:
+                    stable_term_type = (
+                        "sample_tangent" if args.stable_mode_tangent == "view_standardized" else "sample"
+                    )
+                    stable_z1_i, stable_inv_scale1_i = standardization_tangent_context(view1_fit)
+                    stable_z2_i, stable_inv_scale2_i = standardization_tangent_context(view2_fit)
                     stable_term1_i = {
-                        "type": "sample",
+                        "type": stable_term_type,
                         "name": "stable_mode_view1",
                         "weight": fit_weight * float(args.stable_mode_penalty),
                         "features": phi_v1_fit,
@@ -1054,9 +1140,11 @@ def run_variant(args, point, tensors, variant, device):
                         "stable_mode_term": True,
                         "stable_mode_fit_weight": fit_weight,
                         "stable_mode_operator_scale": 1.0,
+                        "reference_z": stable_z1_i,
+                        "reference_inv_scale": stable_inv_scale1_i,
                     }
                     stable_term2_i = {
-                        "type": "sample",
+                        "type": stable_term_type,
                         "name": "stable_mode_view2",
                         "weight": fit_weight * float(args.stable_mode_penalty),
                         "features": phi_v2_fit,
@@ -1069,6 +1157,8 @@ def run_variant(args, point, tensors, variant, device):
                         "stable_mode_term": True,
                         "stable_mode_fit_weight": fit_weight,
                         "stable_mode_operator_scale": 1.0,
+                        "reference_z": stable_z2_i,
+                        "reference_inv_scale": stable_inv_scale2_i,
                     }
                     stable_operator_scale = 1.0
                     if args.stable_mode_normalization == "operator":
@@ -1469,6 +1559,25 @@ def run_variant(args, point, tensors, variant, device):
         after_bt = bt_hidden_metrics(v1_np, v2_np, args.bt_lambda)
         after_test_bt = bt_hidden_metrics(v1_test_np, v2_test_np, args.bt_lambda)
         after_sd = shared_difference_metrics(v1_np, v2_np)
+        if float(args.stable_mode_penalty) > 0.0 or args.stable_mode_diagnostic:
+            stable_update_diag = stable_mode_update_diagnostics(
+                view1_before,
+                view2_before,
+                view1_tr,
+                view2_tr,
+                delta_v1,
+                delta_v2,
+                args,
+            )
+        else:
+            stable_update_diag = {
+                "stable_mode_diag_count": 0,
+                "stable_mode_raw_update_rms": float("nan"),
+                "stable_mode_tangent_update_rms": float("nan"),
+                "stable_mode_actual_delta_rms": float("nan"),
+                "stable_mode_raw_actual_cosine": float("nan"),
+                "stable_mode_tangent_actual_cosine": float("nan"),
+            }
         row = {
             "variant": variant,
             "seed": point.seed,
@@ -1518,6 +1627,7 @@ def run_variant(args, point, tensors, variant, device):
             "stable_mode_penalty": float(args.stable_mode_penalty),
             "stable_mode_count_requested": int(args.stable_mode_count),
             "stable_mode_kind": args.stable_mode_kind,
+            "stable_mode_tangent": args.stable_mode_tangent,
             "stable_mode_count": stable_mode_summary["stable_mode_count"],
             "stable_mode_ridge": float(args.stable_mode_ridge),
             "stable_mode_max_delta_threshold": float(args.stable_mode_max_delta),
@@ -1527,9 +1637,16 @@ def run_variant(args, point, tensors, variant, device):
             "stable_mode_effective_weight": stable_mode_effective_weight,
             "stable_mode_weight_min": float(args.stable_mode_weight_min),
             "stable_mode_weight_max": float(args.stable_mode_weight_max),
+            "stable_mode_diag_count": stable_update_diag["stable_mode_diag_count"],
+            "stable_mode_raw_update_rms": stable_update_diag["stable_mode_raw_update_rms"],
+            "stable_mode_tangent_update_rms": stable_update_diag["stable_mode_tangent_update_rms"],
+            "stable_mode_actual_delta_rms": stable_update_diag["stable_mode_actual_delta_rms"],
+            "stable_mode_raw_actual_cosine": stable_update_diag["stable_mode_raw_actual_cosine"],
+            "stable_mode_tangent_actual_cosine": stable_update_diag["stable_mode_tangent_actual_cosine"],
             "old_span_update_penalty": float(args.old_span_update_penalty),
             "old_span_update_ridge": float(args.old_span_update_ridge),
             "old_span_update_normalization": args.old_span_update_normalization,
+            "old_span_update_tangent": args.old_span_update_tangent,
             "old_span_update_weight_min": float(args.old_span_update_weight_min),
             "old_span_update_weight_max": float(args.old_span_update_weight_max),
             "old_span_effective_weight": old_span_effective_weight,
@@ -1797,6 +1914,21 @@ def summarize(mech_rows, readout_summaries):
                 "mean_stable_mode_effective_weight": safe_nanmean(
                     [row["stable_mode_effective_weight"] for row in rows]
                 ),
+                "mean_stable_mode_raw_update_rms": safe_nanmean(
+                    [row["stable_mode_raw_update_rms"] for row in rows]
+                ),
+                "mean_stable_mode_tangent_update_rms": safe_nanmean(
+                    [row["stable_mode_tangent_update_rms"] for row in rows]
+                ),
+                "mean_stable_mode_actual_delta_rms": safe_nanmean(
+                    [row["stable_mode_actual_delta_rms"] for row in rows]
+                ),
+                "mean_stable_mode_raw_actual_cosine": safe_nanmean(
+                    [row["stable_mode_raw_actual_cosine"] for row in rows]
+                ),
+                "mean_stable_mode_tangent_actual_cosine": safe_nanmean(
+                    [row["stable_mode_tangent_actual_cosine"] for row in rows]
+                ),
                 "final_effective_rank": final["after_effective_rank"],
                 "mean_linear_novelty": float(np.nanmean([row["prev_to_cur_linear_novelty"] for row in rows])),
                 "last_layer_accuracy": readout.get("last_layer_accuracy", float("nan")),
@@ -1942,6 +2074,8 @@ def main():
     parser.add_argument("--sample-mode-balance-max-gain", type=float, default=0.0)
     parser.add_argument("--stable-mode-penalty", type=float, default=0.0)
     parser.add_argument("--stable-mode-kind", choices=["agreement", "pca"], default="agreement")
+    parser.add_argument("--stable-mode-tangent", choices=["raw", "view_standardized"], default="raw")
+    parser.add_argument("--stable-mode-diagnostic", action="store_true")
     parser.add_argument("--stable-mode-count", type=int, default=128)
     parser.add_argument("--stable-mode-ridge", type=float, default=1e-3)
     parser.add_argument("--stable-mode-max-delta", type=float, default=0.0)
@@ -1951,6 +2085,7 @@ def main():
     parser.add_argument("--old-span-update-penalty", type=float, default=0.0)
     parser.add_argument("--old-span-update-ridge", type=float, default=1e-3)
     parser.add_argument("--old-span-update-normalization", choices=["none", "operator"], default="none")
+    parser.add_argument("--old-span-update-tangent", choices=["raw", "view_standardized"], default="raw")
     parser.add_argument("--old-span-update-weight-min", type=float, default=0.0)
     parser.add_argument("--old-span-update-weight-max", type=float, default=0.0)
     parser.add_argument("--old-span-adaptive-path", type=float, nargs="+", default=[])
