@@ -106,6 +106,13 @@ def identity_delta_target(corr, eta_layer, balance_diag=False):
     return float(eta_layer) * target
 
 
+def diag_identity_delta_target(corr):
+    out = torch.zeros_like(corr)
+    diag = torch.arange(corr.shape[0], device=corr.device)
+    out[diag, diag] = 1.0 - corr[diag, diag]
+    return out
+
+
 def moment_delta_target(args, corr, bt_grad, eta_layer):
     bt_target = -float(eta_layer) * precondition_bt_gradient(bt_grad, args.diag_gradient_multiplier)
     if args.moment_target_kind == "bt":
@@ -120,6 +127,17 @@ def moment_delta_target(args, corr, bt_grad, eta_layer):
     if args.moment_target_kind == "bt_plus_polar":
         return bt_target + polar_target
     raise ValueError(f"Unknown moment target kind: {args.moment_target_kind}")
+
+
+def moment_loss_entry_weight(args, corr):
+    if args.moment_loss_metric == "fro":
+        return None
+    if args.moment_loss_metric == "diag_balanced":
+        weight = torch.ones_like(corr)
+        diag = torch.arange(corr.shape[0], device=corr.device)
+        weight[diag, diag] = float(max(1, corr.shape[0] - 1))
+        return weight / torch.clamp(weight.mean(), min=1e-12)
+    raise ValueError(f"Unknown moment loss metric: {args.moment_loss_metric}")
 
 
 def standardization_tangent_project(delta_z, z):
@@ -982,7 +1000,18 @@ def apply_term_operator(b, term):
 
 def term_probe_energy(term, probe):
     achieved = apply_term_operator(probe, term)
-    return torch.mean(achieved * achieved)
+    return term_output_energy(achieved, term)
+
+
+def apply_term_entry_weight(value, term):
+    entry_weight = term.get("entry_weight")
+    if entry_weight is None:
+        return value
+    return value * entry_weight
+
+
+def term_output_energy(value, term):
+    return torch.mean(value * apply_term_entry_weight(value, term))
 
 
 def effective_old_span_weight(args, penalty, operator_scale):
@@ -1108,14 +1137,14 @@ def normal_operator_terms(b, terms, rho):
     out = float(rho) * b
     for term in terms:
         achieved = apply_term_operator(b, term)
-        out = out + float(term["weight"]) * adjoint_term_operator(achieved, term)
+        out = out + float(term["weight"]) * adjoint_term_operator(apply_term_entry_weight(achieved, term), term)
     return out
 
 
 def cg_solve_moment_ols_terms(terms, shape, dtype, device, rho, max_iter, tol):
     rhs = torch.zeros(shape, dtype=dtype, device=device)
     for term in terms:
-        rhs = rhs + float(term["weight"]) * adjoint_term_operator(term["target"], term)
+        rhs = rhs + float(term["weight"]) * adjoint_term_operator(apply_term_entry_weight(term["target"], term), term)
     x = torch.zeros_like(rhs)
     r = rhs - normal_operator_terms(x, terms, rho)
     p = r.clone()
@@ -1192,6 +1221,27 @@ def cosine_matrix(a, b):
     af = a.reshape(-1)
     bf = b.reshape(-1)
     return float((torch.dot(af, bf) / torch.clamp(torch.linalg.vector_norm(af) * torch.linalg.vector_norm(bf), min=1e-12)).detach().cpu().item())
+
+
+def diag_norm_fraction(matrix):
+    diag = torch.diagonal(matrix)
+    diag_norm = torch.linalg.vector_norm(torch.diag(diag))
+    total_norm = torch.linalg.vector_norm(matrix)
+    return float((diag_norm / torch.clamp(total_norm, min=1e-12)).detach().cpu().item())
+
+
+def moment_law_cosines(prefix, delta_corr, corr, bt_grad):
+    return {
+        f"{prefix}_cos_neg_bt_grad": cosine_matrix(delta_corr, -bt_grad),
+        f"{prefix}_cos_identity_minus_c": cosine_matrix(delta_corr, identity_delta_target(corr, 1.0)),
+        f"{prefix}_cos_balanced_identity": cosine_matrix(
+            delta_corr,
+            identity_delta_target(corr, 1.0, balance_diag=True),
+        ),
+        f"{prefix}_cos_diag_identity": cosine_matrix(delta_corr, diag_identity_delta_target(corr)),
+        f"{prefix}_cos_polar_minus_c": cosine_matrix(delta_corr, polar_delta_target(corr, 1.0, 1.0)),
+        f"{prefix}_diag_norm_frac": diag_norm_fraction(delta_corr),
+    }
 
 
 def relative_r2(pred, target):
@@ -1457,6 +1507,7 @@ def solve_layernorm_gain_floor_candidate(
         )
         target_grad_i = precondition_bt_gradient(grad_i, cand_args.diag_gradient_multiplier)
         target_i = moment_delta_target(cand_args, corr_i, grad_i, eta_layer)
+        entry_weight_i = moment_loss_entry_weight(cand_args, corr_i)
         phi1_i = center_torch(phi_v1_fit)
         phi2_i = center_torch(phi_v2_fit)
         inv_scale1_i = 1.0 / torch.clamp(scale1_i, min=1e-12)
@@ -1475,6 +1526,7 @@ def solve_layernorm_gain_floor_candidate(
             "inv_scale2": inv_scale2_i,
             "layernorm_eps": float(cand_args.layernorm_eps),
             "target": target_i,
+            "entry_weight": entry_weight_i,
         }
         terms.append(bt_term_i)
         if float(cand_args.layernorm_kinetic_weight) > 0.0:
@@ -1918,6 +1970,7 @@ def run_variant_adaptive_gain_floor(args, point, tensors, variant, device):
             "eta_layer": eta_layer,
             "ols_ridge": float(args.ols_ridge),
             "moment_target_kind": args.moment_target_kind,
+            "moment_loss_metric": args.moment_loss_metric,
             "moment_target_weight": float(args.moment_target_weight),
             "polar_target_weight": float(args.polar_target_weight),
             "sample_gradient_weight": float(args.sample_gradient_weight),
@@ -2041,6 +2094,8 @@ def run_variant_adaptive_gain_floor(args, point, tensors, variant, device):
             "actual_delta_target_cosine": cosine_matrix(actual_corr_delta, target),
             "actual_delta_achieved_cosine": cosine_matrix(actual_corr_delta, achieved),
             "actual_delta_vs_achieved_r2": relative_r2(actual_corr_delta, achieved),
+            **moment_law_cosines("achieved_delta", achieved, corr, grad),
+            **moment_law_cosines("actual_delta", actual_corr_delta, corr, grad),
             "before_self_corr_offdiag_per_dim": float(
                 (
                     0.5 * (self_corr_offdiag_per_dim_torch(view1_before) + self_corr_offdiag_per_dim_torch(view2_before))
@@ -2220,6 +2275,7 @@ def run_variant(args, point, tensors, variant, device):
             z1_i, z2_i, corr_i, grad_i, scale1_i, scale2_i = bt_corr_and_gradient(view1_fit, view2_fit, args.bt_lambda)
             target_grad_i = precondition_bt_gradient(grad_i, args.diag_gradient_multiplier)
             target_i = moment_delta_target(args, corr_i, grad_i, eta_layer)
+            entry_weight_i = moment_loss_entry_weight(args, corr_i)
             phi1_i = center_torch(phi_v1_fit)
             phi2_i = center_torch(phi_v2_fit)
             m1_i = (phi1_i.T @ z2_i) / float(z1_i.shape[0])
@@ -2242,6 +2298,7 @@ def run_variant(args, point, tensors, variant, device):
                     "inv_scale2": inv_scale2_i,
                     "layernorm_eps": float(args.layernorm_eps),
                     "target": target_i,
+                    "entry_weight": entry_weight_i,
                 }
             else:
                 bt_term_i = {
@@ -2254,6 +2311,7 @@ def run_variant(args, point, tensors, variant, device):
                     "inv_scale2": inv_scale2_i,
                     "context": context_i,
                     "target": target_i,
+                    "entry_weight": entry_weight_i,
                 }
             terms.append(bt_term_i)
             if float(args.layernorm_kinetic_weight) > 0.0:
@@ -3050,6 +3108,7 @@ def run_variant(args, point, tensors, variant, device):
             "eta_layer": eta_layer,
             "ols_ridge": float(args.ols_ridge),
             "moment_target_kind": args.moment_target_kind,
+            "moment_loss_metric": args.moment_loss_metric,
             "moment_target_weight": float(args.moment_target_weight),
             "polar_target_weight": float(args.polar_target_weight),
             "sample_gradient_weight": float(args.sample_gradient_weight),
@@ -3179,6 +3238,8 @@ def run_variant(args, point, tensors, variant, device):
             "actual_delta_target_cosine": cosine_matrix(actual_corr_delta, target),
             "actual_delta_achieved_cosine": cosine_matrix(actual_corr_delta, achieved),
             "actual_delta_vs_achieved_r2": relative_r2(actual_corr_delta, achieved),
+            **moment_law_cosines("achieved_delta", achieved, corr, grad),
+            **moment_law_cosines("actual_delta", actual_corr_delta, corr, grad),
             "before_self_corr_offdiag_per_dim": float(
                 (
                     0.5 * (self_corr_offdiag_per_dim_torch(view1_before) + self_corr_offdiag_per_dim_torch(view2_before))
@@ -3407,6 +3468,36 @@ def summarize(mech_rows, readout_summaries):
                 "mean_actual_delta_target_cosine": float(np.mean([row["actual_delta_target_cosine"] for row in rows])),
                 "mean_actual_delta_achieved_cosine": float(np.mean([row["actual_delta_achieved_cosine"] for row in rows])),
                 "mean_actual_delta_vs_achieved_r2": float(np.mean([row["actual_delta_vs_achieved_r2"] for row in rows])),
+                "mean_achieved_delta_cos_neg_bt_grad": float(
+                    np.mean([row["achieved_delta_cos_neg_bt_grad"] for row in rows])
+                ),
+                "mean_achieved_delta_cos_identity_minus_c": float(
+                    np.mean([row["achieved_delta_cos_identity_minus_c"] for row in rows])
+                ),
+                "mean_achieved_delta_cos_balanced_identity": float(
+                    np.mean([row["achieved_delta_cos_balanced_identity"] for row in rows])
+                ),
+                "mean_achieved_delta_cos_polar_minus_c": float(
+                    np.mean([row["achieved_delta_cos_polar_minus_c"] for row in rows])
+                ),
+                "mean_achieved_delta_diag_norm_frac": float(
+                    np.mean([row["achieved_delta_diag_norm_frac"] for row in rows])
+                ),
+                "mean_actual_delta_cos_neg_bt_grad": float(
+                    np.mean([row["actual_delta_cos_neg_bt_grad"] for row in rows])
+                ),
+                "mean_actual_delta_cos_identity_minus_c": float(
+                    np.mean([row["actual_delta_cos_identity_minus_c"] for row in rows])
+                ),
+                "mean_actual_delta_cos_balanced_identity": float(
+                    np.mean([row["actual_delta_cos_balanced_identity"] for row in rows])
+                ),
+                "mean_actual_delta_cos_polar_minus_c": float(
+                    np.mean([row["actual_delta_cos_polar_minus_c"] for row in rows])
+                ),
+                "mean_actual_delta_diag_norm_frac": float(
+                    np.mean([row["actual_delta_diag_norm_frac"] for row in rows])
+                ),
                 "final_self_corr_offdiag_per_dim": final["after_self_corr_offdiag_per_dim"],
                 "mean_self1_target_cosine": float(np.mean([row["self1_target_cosine"] for row in rows])),
                 "mean_self2_target_cosine": float(np.mean([row["self2_target_cosine"] for row in rows])),
@@ -3590,6 +3681,36 @@ def write_report(path, summaries):
     lines.extend(
         [
             "",
+            "## Moment-Law Diagnostics",
+            "",
+            "Cosines compare the realized finite/retracted layer update `dC` and the solver's linearized achieved update to the same moment laws used in the BP-BT velocity diagnostic.",
+            "",
+            "| Variant | Depth | actual cos dC,-grad | actual cos dC,I-C | actual cos dC,balanced I-C | actual cos dC,polar-C | actual diag frac | achieved cos I-C | achieved cos balanced I-C | achieved diag frac |",
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for row in sorted(summaries, key=lambda rec: (rec["depth"], rec["variant"])):
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    row["variant"],
+                    str(row["depth"]),
+                    fmt(row["mean_actual_delta_cos_neg_bt_grad"]),
+                    fmt(row["mean_actual_delta_cos_identity_minus_c"]),
+                    fmt(row["mean_actual_delta_cos_balanced_identity"]),
+                    fmt(row["mean_actual_delta_cos_polar_minus_c"]),
+                    fmt(row["mean_actual_delta_diag_norm_frac"]),
+                    fmt(row["mean_achieved_delta_cos_identity_minus_c"]),
+                    fmt(row["mean_achieved_delta_cos_balanced_identity"]),
+                    fmt(row["mean_achieved_delta_diag_norm_frac"]),
+                ]
+            )
+            + " |"
+        )
+    lines.extend(
+        [
+            "",
             "Files: `mech_rows.jsonl/csv`, `layer_readouts.jsonl/csv`, `setup_readouts.jsonl`, `summary.jsonl/csv`.",
         ]
     )
@@ -3705,6 +3826,12 @@ def main():
         "--moment-target-kind",
         choices=["bt", "identity", "balanced_identity", "polar", "bt_plus_polar"],
         default="bt",
+    )
+    parser.add_argument(
+        "--moment-loss-metric",
+        choices=["fro", "diag_balanced"],
+        default="fro",
+        help="Entry metric for the BT moment-OLS residual. diag_balanced keeps the target unscaled but gives diagonal and off-diagonal blocks comparable aggregate weight.",
     )
     parser.add_argument("--moment-target-weight", type=float, default=1.0)
     parser.add_argument("--polar-target-weight", type=float, default=1.0)

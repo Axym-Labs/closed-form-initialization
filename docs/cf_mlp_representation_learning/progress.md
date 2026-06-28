@@ -1,5 +1,30 @@
 # Progress
 
+- EXPERIMENT/ANALYSIS (2026-06-28 11:05 CEST): Added direct moment-law
+  diagnostics to `cf_mlp_moment_ols_residual.py`, so each CF layer now logs
+  realized and linearized cosines against the same laws used for BP-BT:
+  \(-\nabla L_{\mathrm{BT}}\), \(I-C\), balanced \(I-C\), diagonal-only
+  \(I-C\), and \(\operatorname{polar}(C)-C\). This showed that the previous
+  balanced-identity target was monotone but not truly BP-like: at d12 it had
+  mean realized cosines `0.427` to \(I-C\) and `0.368` to polar, with diagonal
+  norm fraction `0.158`, versus greedy BP-BT d12 `0.651/0.643` and diagonal
+  fraction `0.026`. I then tested the cleaner mathematical repair: keep the
+  target as unscaled \(I-C\), but solve the moment OLS problem in a
+  diag-balanced entry metric so diagonal and off-diagonal aggregate residual
+  errors have comparable weight. A small d2 smoke looked promising
+  (`cos dC,I-C = 0.686`, `cos dC,polar = 0.633`), but the full CIFAR100 d12
+  validation falsified it as a BP-trajectory fix. It improved train/test BT
+  from balanced-target `0.5037/0.5505` to `0.4613/0.4964` and all-PCA from
+  `0.1888` to `0.1906`, with every layer BT-improving, but the realized
+  identity/polar alignment got worse (`0.275/0.228`) and late-layer
+  \(I-C\) cosine collapsed from positive to negative by layers 10-12. Exact
+  failure: current CF residual layers still produce small, diagonal-heavy
+  moment motion (`||dC|| ~6.16`, diagonal fraction `0.131`) while BP produces
+  broad low-diagonal operator motion (`||dC|| ~71-80`, diagonal fraction
+  `0.026-0.035`). Metric shaping helps BT but does not change the reachable
+  residual operator enough. Detailed note:
+  `docs/cf_mlp_representation_learning/artifacts/moment_metric_identity_failure_note.md`.
+
 - EXPERIMENT/ANALYSIS (2026-06-28 10:49 CEST): Switched from branch/gain
   scanning to a BP-mechanism-derived target. I added
   `cf_mlp_bp_moment_velocity.py`, which measures residual BP-BT's realized
