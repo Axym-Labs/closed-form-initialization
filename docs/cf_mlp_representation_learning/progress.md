@@ -1,5 +1,207 @@
 # Progress
 
+- EXPERIMENT/ANALYSIS (2026-06-28 06:37 CEST): Kept the moment-gradient OLS
+  idea and localized the remaining failure of the old-span repair. The fixed
+  penalty was not wrong in sign; it failed because a single global strength
+  mixes two incompatible units: local BT gain and old-span residual motion.
+  I added an adaptive old-span path inside the same closed-form solve:
+  solve a small operator-normalized regularization path
+  (`0, 1, 2, 5`), preserve `95%` of the best local train-BT gain, then choose
+  the candidate with the smallest realized old-span update RMS. This stays in
+  the gradient-of-objective step regime:
+  \(\|L_\Phi(B)-T_{\mathrm{BT}}\|^2+\mu\|\Pi_H\Phi B\|^2+\rho\|B\|^2\),
+  with \(\mu\) chosen from a local realized tradeoff rather than tuned as a
+  dataset constant. The fix is real but not a full semantic breakthrough. On
+  CIFAR100 depth 12, adaptive old-span matches baseline held-out BT while
+  improving rank/readout: baseline `0.3486/0.3603`, rank `16.4`, all-PCA
+  `0.1848`; adaptive `0.3418/0.3603`, rank `23.7`, all-PCA `0.1934`.
+  At depth 24 it composes better than the baseline: baseline `0.3237/0.3374`,
+  rank `19.6`, all-PCA `0.1930`; adaptive `0.3173/0.3334`, rank `22.2`,
+  all-PCA `0.1952`. The layer schedule was mixed on CIFAR (`0/1/2/5`
+  penalties, strong mostly late), proving the adaptive rule is not just a
+  renamed constant. On Tiny ImageNet Barlow, the rule selects the strong
+  penalty everywhere; depth 12 improves baseline `0.6087/0.6374`, rank `39.0`,
+  all-PCA `0.0670` to `0.5863/0.6273`, rank `41.6`, all-PCA `0.0680`. A new
+  depth-24 Tiny control shows the same sign but still weak semantics:
+  baseline `0.5950/0.6428`, rank `48.6`, all-PCA `0.0666`; adaptive
+  `0.5687/0.6330`, rank `52.7`, all-PCA `0.0668`. Interpretation: the exact
+  previous failure was not the moment-gradient objective itself, but projecting
+  it through a branch dictionary that repeatedly allowed old-span motion; the
+  adaptive old-span penalty fixes that destructiveness enough to be the current
+  best mechanism. The remaining gap is that Tiny still gains BT/rank without
+  meaningful semantic readout, so the next minor pivot should stay in this
+  regime but choose the path using a smoother BT-gain-per-old-span-slope or a
+  held-out/nuclear statistic rather than the current endpoint-heavy `95%`
+  cutoff. Artifacts:
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_cifar100_oldspan_adapt095_ls_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_cifar100_oldspan_adapt095_ls_d24_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_oldspan_adapt095_ls_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_oldspan_adapt095_ls_d24_b1024/`,
+  and
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_stochastic_d24_b1024/`.
+
+- EXPERIMENT/ANALYSIS (2026-06-28 04:35 CEST): Extended the realized-gain
+  diagnostic into a more faithful mechanism test: (i) added line-search scales
+  and a null option to the scan, (ii) added broader branch candidates
+  (`randorth`, `concat_cf_rand`, `concat_cf_rand2`), and (iii) added a
+  held-out-positive line-search option to the main residual solver. The
+  broadened prefix-6 Tiny scan overturned the strongest version of the
+  previous "no mid-depth positive directions" claim: smaller scales reveal
+  positive held-out BT directions. At prefix 6, `plain` and `modeout025` at
+  scale `0.25` improve held-out BT `0.6602 -> 0.6586` and nuclear
+  `0.2280 -> 0.2290/0.2291`; `nov025` is slightly worse on BT but comparable
+  on nuclear/readout. Random-only and concat CF+random branches only become
+  near-null at scale `0.0625`, while `sharedcross` chooses the null action.
+  Thus the update cone is not empty, but useful candidates are small and still
+  CF-shaped; naive random broadening does not add useful invariant directions.
+  Turning the scale lesson into a full trajectory did not yet work. Ordinary
+  full-train line search reproduces the old Tiny stochastic result exactly
+  (`0.6087/0.6374`, all-PCA `0.0670`), while validation-subset line search
+  with 4096 held-out train positives slightly worsens it (`0.6109/0.6416`,
+  all-PCA `0.0646`). Novelty `0.25` with validation line search likewise
+  stays worse (`0.6176/0.6488`, all-PCA `0.0662`). Interpretation: one-step
+  realized-gain selection is a valid diagnostic, but naive local scale
+  selection does not compose across depth. The next mechanism should either
+  select candidates using a more stable multi-step/smoothed criterion or
+  explicitly maintain a budgeted stepwise mode-assembly schedule rather than
+  independently minimizing local BT each layer. Artifacts:
+  `docs/cf_mlp_representation_learning/artifacts_realized_gain_scan_tiny_prefix6_broad_ls/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_stochastic_lseval4096_d12_b1024/`,
+  and
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_novelty_mix025_lseval4096_d12_b1024/`.
+
+- EXPERIMENT/ANALYSIS (2026-06-28 04:25 CEST): Added
+  `cf_mlp_realized_gain_scan.py`, a lightweight diagnostic for the next
+  proposed mechanism: realized-gain branch/update selection. Instead of
+  choosing a target matrix and hoping the branch realizes it, the script
+  evaluates a small menu of candidate branch dictionaries by their actual
+  one-step OLS residual update: train/held-out BT, cross-correlation nuclear
+  mass, covariance rank, self-cov off-mass, and a one-layer linear readout.
+  This directly probes the realizable update cone. On Tiny ImageNet at layer
+  1, there is small but real candidate signal: `modeout025` is best by
+  held-out BT (`0.6770 -> 0.6702`) and nuclear (`0.2401`), followed by
+  `plain/randomblend01/nov025` around `0.6718-0.6721`; `sharedcross` is bad
+  (`0.6902`). After six ordinary baseline CF layers, however, every tested
+  nonzero candidate worsens held-out BT: `modeout025` is least bad
+  (`0.6602 -> 0.6649`), `plain/randomblend01` are `0.6652-0.6653`, novelty
+  variants trade worse BT for slightly better readout, and `sharedcross`
+  again fails (`0.6845`). Interpretation: candidate scoring is useful, but
+  the current candidate menu/update cone may lack positive held-out invariant
+  directions in the mid-depth regime. A realized-gain selector should include
+  a null/skip option, line-search scales, and broader candidate generators; if
+  those still fail, the branch dictionary is the bottleneck more than the
+  target/scoring rule. Artifacts:
+  `docs/cf_mlp_representation_learning/artifacts_realized_gain_scan_tiny_l1/`
+  and
+  `docs/cf_mlp_representation_learning/artifacts_realized_gain_scan_tiny_prefix6/`.
+
+- EXPERIMENT/ANALYSIS (2026-06-28 04:14 CEST): Tested the next coupled
+  objective implied by the gauge/nuclear-mass diagnosis: replace or augment
+  coordinate BT with a polar cross-correlation target. For \(C=U\Sigma V^\top\)
+  the new moment target was \(UV^\top-C\), i.e. grow paired-view alignment in
+  the current optimal rotational gauge before insisting on coordinate identity.
+  This was rejected. On Tiny ImageNet depth 12, pure polar created very high
+  covariance rank (`346.5`) and low self-cov off-mass (`0.74`), but destroyed
+  BT (`0.9736/0.9724` train/test), corr diag (`0.013/0.014`), all-PCA
+  (`0.0488`), and did not realize useful cross-view nuclear growth
+  (`train/test nuclear 0.134/0.255`). Adding polar to BT also failed unless
+  the polar weight was made so small or line-searched so hard that the effect
+  mostly disappeared: weights `1/0.25/0.1/0.02` gave test BT
+  `0.944/0.856/0.794/0.726`, ranks `244/134/101/72`, and all-PCA
+  `0.0516/0.0614/0.0664/0.0658`. A BT line search on weight `0.1` restored
+  monotone BT (`0.6538/0.6720`) but gave weak readout (`0.0598`) and only
+  modest nuclear (`0.216/0.234`). Interpretation: the failure is not merely
+  that coordinate-identity BT is the wrong gauge. Under the current nonlinear
+  residual branch dictionary and moment OLS projection, a gauge-invariant
+  nuclear target is not realized as invariant signal; it mostly manufactures
+  high-rank, low-correlation features. This strengthens the conclusion that
+  the missing mechanism is a coupled realizable projection: target selection
+  must account for which branch directions can actually increase held-out
+  cross-view nuclear/diagonal mass, not only what correlation-space objective
+  looks natural. Artifacts:
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_polar_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_bt_plus_polar_w002_d12_b1024/`,
+  and
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_bt_plus_polar_w01_ls_d12_b1024/`.
+
+- EXPERIMENT/ANALYSIS (2026-06-28 04:00 CEST): Tested two mechanism-level
+  attempts to close the remaining moment+sample gap: spectral mode balancing
+  of the sample-gradient target, and spectral mode balancing of the nonlinear
+  branch dictionary. Both are rejected as primary fixes, but they sharpen the
+  natural framework. The sample-target version right-multiplies the
+  activation-space BT-gradient target by a smooth inverse self-covariance
+  operator before the standardization tangent projection. On Tiny ImageNet
+  depth 12 with the current hybrid sample-weight `8`, powers `0.25` and `0.5`
+  gave train/test BT `0.5591/0.5866` and `0.5620/0.5880`, rank `26.2/25.8`,
+  and all-PCA `0.0578/0.0590`, worse than unbalanced hybrid `8`
+  (`0.5356/0.5685`, rank `23.9`, all-PCA `0.0626`). It buys a little rank
+  but gives back the invariant-signal gain, confirming that old-span target
+  preconditioning is too late in the computation. CIFAR100 generalization of
+  the hybrid was also negative: sample-weight `4/8` reached only
+  `0.3744/0.3845` and `0.3954/0.4044` train/test BT with all-PCA
+  `0.1748/0.1758`, worse than the stochastic moment baseline
+  (`0.3486/0.3603`, all-PCA `0.1848`) and novelty baseline
+  (`0.3496/0.3623`, all-PCA `0.1896`). The hybrid therefore fixes a Tiny
+  objective-gradient failure mode but does not generalize as a representation
+  fix. Branch-side inverse-covariance balancing is an even clearer
+  counterexample to "rank is the goal." Input-side powers `0.1/0.25/0.5`
+  produced high rank (`63/51/86`) and low self-cov off-mass (`10.5/12.6/8.3`)
+  but destroyed BT trajectory/generalization (`test BT 0.729/0.771/0.833`).
+  Output-side power `0.25` slightly improved Tiny all-PCA to `0.0704` but
+  also broke held-out BT (`0.6932`). Adding BT line search restored BT
+  (`0.6071/0.6314`) but removed the readout gain (`all-PCA 0.0612`). Thus
+  low-energy branch allocation can manufacture breadth and sometimes labels,
+  but the new modes are not invariant-aligned. Current conclusion: the natural
+  object is not rank, self-covariance, or inverse-covariance balancing by
+  itself; it is a coupled constrained projection that must grow cross-view
+  nuclear/diagonal mass while allocating new modes. Artifacts:
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_hybrid_w8_s005_modebal025_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_cifar100_hybrid_w4_s005_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_cifar100_hybrid_w8_s005_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_branch_modebal025_output_d12_b1024/`,
+  and
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_branch_modebal025_output_ls_d12_b1024/`.
+
+- EXPERIMENT/ANALYSIS (2026-06-28 03:39 CEST): Localized and partially fixed
+  the sample-gradient CF-BT failure without leaving the objective-gradient
+  regime. The naive sample-space BT-gradient OLS was not failing because it
+  immediately increased the scalar self-correlation off-mass: a strict
+  self-covariance capped line search reproduced the destructive run exactly,
+  with all full steps feasible, because self-cov off-mass decreased every
+  layer (`155.8 -> 120.5`) while covariance effective rank still collapsed
+  (`32.7 -> 18.5`) and readout fell (`all-PCA 0.0496`). A rank-floor line
+  search found the opposing constraint: strict rank preservation selected
+  essentially zero updates (`update/input 1.8e-5`, BT stayed `0.681/0.677`),
+  and a 2% rank-loss tolerance picked quarter steps that preserved rank better
+  (`29.3`) but gave back most BT gain (`0.643/0.649`). Thus the exact failure
+  is directional, not scalar step size: the raw activation-gradient target is
+  mostly an old-span linear transform of the current representation, so BT
+  descent and rank preservation are locally antagonistic along that direction.
+  A small directional pivot worked: fit the sample-gradient target jointly
+  with the moment-space BT correlation target, treating the moment equation as
+  the nondestructive statistical constraint and the sample term as invariant
+  signal amplification. On Tiny ImageNet Barlow depth 12, hybrid
+  sample-weight `4` reached train/test BT `0.5299/0.5843`, corr
+  `0.288/0.249`, rank `31.4`, self-cov off `34.4`, and last/all-PCA
+  `0.0586/0.0608`; sample-weight `8` reached stronger held-out BT
+  `0.5356/0.5685`, corr `0.293/0.269`, nuclear `0.298/0.289`, rank `23.9`,
+  self-cov off `59.6`, and last/all-PCA `0.0574/0.0626`. Compared with pure
+  sample-gradient, weight-8 improves held-out BT (`0.5868 -> 0.5685`) while
+  substantially reducing collapse (`rank 18.5 -> 23.9`, self-cov off
+  `120.5 -> 59.6`, all-PCA `0.0496 -> 0.0626`). A depth check for weight-8
+  stayed monotone: depth 6 train/test BT `0.5560/0.5993`, rank `27.0`; depth
+  24 `0.5301/0.5663`, rank `23.8`, with BT-improving fraction `1.0`. This is
+  not yet a semantic readout win over moment-only Tiny (`all-PCA 0.0670`), but
+  it fixes the specific destructive sample-gradient failure and gives a viable
+  next mechanism: constrained moment+sample gradient projection rather than
+  raw activation-gradient imitation. Artifacts:
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_samplegrad_pure_s005_lscap0_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_samplegrad_pure_s005_lsrank002_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_samplegrad_hybrid_w4_s005_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_samplegrad_hybrid_w8_s005_d12_b1024/`,
+  and
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_tiny_barlow_samplegrad_hybrid_w8_s005_d6_d24_b1024/`.
+
 - EXPERIMENT/ANALYSIS (2026-06-27 23:43 CEST): Added and ran
   `cf_mlp_residual_bt_route3.py` for the requested route-3 empirical pass:
   infer the residual BP-BT update law and test whether cross-layer credit
@@ -1172,3 +1374,380 @@
   requested exploration of layer choices and other parameters informed by the
   supervised-stream evidence. Also pointed to the read-only Primary vault note
   `01 Wissen/03 Ideen/I. Closed Form DNN.md`.
+
+- EXPERIMENT (2026-06-28): Implemented `cf_mlp_moment_ols_residual.py`, a
+  nonlinear residual CF-BT candidate that fits a residual update in BT
+  correlation moment space. Each layer uses
+  `H <- normalize(H + leaky_gelu(H A) B)` with `width=512`, branch width `512`,
+  same-instance CIFAR100 SimCLR positives, and a frozen-standardization
+  tangent target `delta C ~= -eta * grad_C L_BT`. The OLS operator fits
+  `B` from paired moments of the nonlinear branch features rather than treating
+  the activation as linear. Full-data depth `6/12/24` runs at
+  `eta_total=0.5`, `ols_ridge=1e-5`, `cg_iters=120`, seed `7`, no TF32 are in
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_residual_full_eta05/`.
+  Mechanistic result: the method is stable and nondestructive but does not
+  produce the backprop-like monotone BT trajectory. At depth 24, `cf_shrink`
+  ends at train/test BT per dim `0.5275/0.5348` from initial `0.5266`, with
+  corr diag `0.376`, shared/diff `2.18`, effective rank `21.9`, last/all-PCA
+  accuracy `0.1516/0.1602`; `random_orth` is worse for BT, ending at
+  `0.5430/0.5552`, corr diag `0.336`, shared/diff `2.00`, rank `27.8`,
+  last/all-PCA `0.1582/0.1590`.
+
+- DIAGNOSTIC (2026-06-28): Added actual correlation-delta diagnostics and
+  reran full-data depth-24 in
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_residual_depth24_actual_delta/`.
+  This localizes the failure: the OLS-predicted correlation step has the right
+  first-order sign (`cf_shrink` mean predicted BT loss change per dim
+  `-8.53e-4`; `random_orth` `-1.68e-3`), but the realized nonlinear residual
+  step is essentially orthogonal to the desired/predicted moment movement.
+  For depth-24 `cf_shrink`, mean achieved-target cosine is `0.165`, but mean
+  actual-target cosine is `-7.9e-4`, actual-achieved cosine is `8.1e-5`, and
+  actual first-order BT loss change is `+3.0e-5`. For `random_orth`, the
+  mismatch is stronger: actual-target cosine `-0.0077`, actual-achieved cosine
+  `-0.0355`, actual first-order loss change `+6.53e-4`. Interpretation:
+  moment-space OLS in this frozen tangent is not yet a working residual CF-BT
+  rule. The immediate bottleneck is not downstream semantics, nor pure target
+  span; it is that the fitted branch update does not realize the intended
+  correlation-space velocity after the nonlinear residual transformation.
+
+- FIX (2026-06-28): Found and corrected the exact tangent failure in
+  `cf_mlp_moment_ols_residual.py`. BT is a correlation objective after
+  per-view standardization, so the residual moment operator must include the
+  Jacobian of standardization:
+  `delta z = delta u - z E[z delta u]`, not only the frozen-scale
+  `delta u`. The corrected projected-standardization operator adds the
+  row/column subtraction terms
+  `-diag(B1^T N1) C - C diag(B2^T N2)` to the moment OLS map. A depth-1
+  finite-difference diagnostic on CIFAR100 SimCLR (`n_train=4096`) verified
+  the fix: the old frozen tangent had finite-difference/predicted cosine
+  `0.338`, while the projected tangent reached `1.000`. With the correction,
+  depth-6 calibration (`n_train=12000`, `eta_total=0.5`) became monotone and
+  actual/predicted correlation movement matched: `cf_shrink` final train/test
+  BT per dim `0.5140/0.5159`, actual/pred cosine `0.991`; `random_orth`
+  `0.4974/0.5099`, actual/pred cosine `0.942`.
+
+- EXPERIMENT (2026-06-28): Full-data corrected moment-OLS residual CF-BT with
+  the CF-shrink branch (`width=512`, branch width `512`, seed `7`, no TF32)
+  now shows a BP-like qualitative BT trajectory: monotone improvement across
+  depth and train/test positive-pair tracking. With fixed eta-total `4.0`
+  over depths `6/12/24`, final train/test BT per dim was
+  `0.4479/0.4509`, `0.4455/0.4475`, and `0.4443/0.4459`; actual/predicted
+  correlation-delta cosine at depth 24 was `0.985`. Artifacts:
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_projected_full_eta4_cfshrink/`.
+  Eta-total `8.0` improved the objective further but lowered rank:
+  depth-24 train/test BT `0.4077/0.4295`, corr diag `0.543/0.538`,
+  shared/diff `3.38`, effective rank `9.10`, all-PCA readout `0.1748`;
+  artifacts:
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_projected_full_eta8_cfshrink/`.
+
+- EXPERIMENT (2026-06-28): Added a minor trust-region pivot that stays in the
+  gradient-step regime: solve the same projected moment-OLS direction, then
+  choose a scalar step by backtracking on the actual train BT objective. This
+  repaired the finite-step failure at large eta. At depth 24, eta-total `16`
+  without line search failed (`0.5199/0.5465`, improve fraction `0.458`,
+  actual/pred cosine `0.188`, rank `6.43`). With line search, eta-total `16`
+  became monotone and reached train/test BT `0.3901/0.4114`, actual/pred
+  cosine `0.557`, rank `9.28`, all-PCA `0.1758`. Stronger eta-total `32`
+  and `64` with line search reached `0.3663/0.3822` and `0.3516/0.3709`,
+  respectively; all-PCA readout stayed about `0.181`, best single-layer
+  readout about `0.163`, and effective rank about `10`. Interpretation:
+  the original idea is fixed at the mechanistic/tangent level and now gives a
+  genuine monotone gradient-step BT trajectory, but it remains far weaker than
+  residual BP-BT (`0.1198` e2e, `0.0297` greedy at depth 24) and much more
+  compressed/lower-rank. The next issue is not "moment OLS cannot realize its
+  own step"; it is that the CF-shrink branch/preconditioner gives a
+  low-rank, semantics-weak descent direction.
+
+- DIAGNOSTIC (2026-06-28): Added
+  `cf_mlp_rank_compression_audit.py` and report
+  `docs/cf_mlp_representation_learning/artifacts_rank_compression_audit_seed7/report.md`
+  to separate covariance rank, agreement-spectrum rank, and readout quality.
+  This confirms the low-rank issue does not apply to greedy residual BP-BT in
+  the same way: depth-24 greedy residual BP-BT has BT `0.0297`, stage
+  covariance rank about `111`, agreement soft-keep mass `197`, all-PCA
+  `0.201`, and best layer `0.2292`. Corrected full-dataset moment OLS has
+  monotone BT but rank only about `9-12`. Non-residual BP-BT does collapse at
+  depth 24 (rank `1`), but it also fails the BT objective (`0.9778`), so that
+  is an architecture/optimization mismatch rather than evidence that SGD
+  generically causes rank collapse.
+
+- EXPERIMENT (2026-06-28): Tested a direct self-covariance decorrelation target
+  inside the same moment-OLS normal equation. This was a negative mechanism.
+  In depth-6 calibration at `n_train=12000`, eta-total `32`, full-moment
+  baseline reached train/test BT `0.4071/0.4160`, self-covariance off-mass
+  `78.4`, rank `10.8`, all-PCA `0.140`. Adding self-cov weights `0.01` and
+  `0.1` raised rank to `18.5` and `20.6`, but mostly suppressed BT descent:
+  final train/test BT `0.5276/0.5283` and `0.5314/0.5311`. Per-layer
+  diagnostics show the self-cov target is locally realized, but line search
+  takes small steps and the useful BT direction is lost. Interpretation:
+  direct covariance penalty is not the right way to preserve/elevate rank.
+
+- EXPERIMENT (2026-06-28): Tested stochastic/minibatch moment estimation as a
+  mechanism-level fix motivated by the SGD/stepwise-eigenmode hypothesis. The
+  layer still solves a closed-form projected moment-OLS problem, but the
+  correlation moments and gradient target are estimated from a deterministic
+  per-layer minibatch while all train/test metrics are evaluated on full data.
+  This is the first fix that improves BT and rank together. Full-data depth-24,
+  eta-total `32`, line search: full moments gave `0.3663/0.3822`, rank `10.1`,
+  all-PCA `0.1816`; batch `4096` gave `0.3360/0.3498`, rank `12.4`,
+  all-PCA `0.1812`; batch `1024` gave `0.3237/0.3374`, self-cov off-mass
+  `28.9`, rank `19.6`, all-PCA `0.1930`; batch `512` raised rank to `26.6`
+  but worsened BT/all-PCA to `0.3616/0.3750` and `0.1892`. Batch `1024` is the
+  best current tradeoff.
+
+- GENERALIZATION CHECK (2026-06-28): Batch-1024 stochastic moment OLS also
+  generalizes across depth on full data: depth 6 train/test BT `0.3920/0.3989`,
+  rank `16.1`, all-PCA `0.1786`; depth 12 `0.3486/0.3603`, rank `16.4`,
+  all-PCA `0.1848`; depth 24 `0.3237/0.3374`, rank `19.6`, all-PCA `0.1930`.
+  This supports the view that stochastic moment estimates help assemble more
+  modes instead of repeatedly descending the same dominant full-dataset modes.
+  It does not close the gap to residual/greedy BP-BT yet.
+
+- EXPERIMENT (2026-06-28): Tested minibatch direction ensembles as a direct
+  check of whether the stochastic-moment benefit was just noisy estimation.
+  This was a useful negative/diagnostic result. At full-data depth 24 with
+  batch `1024`, eta-total `32`, and line search, `K=2` ensembles improved
+  train/test BT to `0.3094/0.3253` but reduced rank to `15.1` and did not
+  improve representation readout (`last/all-PCA/best = 0.1628/0.1922/0.1688`).
+  `K=4` gave `0.3131/0.3278`, rank `12.5`, and
+  `0.1580/0.1850/0.1664`. Interpretation: making the moment estimate more
+  deterministic improves BT descent fidelity but pushes back toward the
+  low-rank mode-reuse failure.
+
+- FIX ATTEMPT (2026-06-28): Added a linearly novel branch option to
+  `cf_mlp_moment_ols_residual.py`. For each layer, the nonlinear branch
+  features can be residualized against the current representation under the
+  pooled train/view sample geometry, then mixed back into the original branch
+  before solving the same projected BT-gradient moment OLS problem. This
+  localizes the next failure exactly: after the first layer, only about `1%`
+  of the CF-shrink nonlinear branch energy is linearly novel
+  (`branch_projection_r2 ~= 0.99`), so the unconstrained solver mostly has
+  access to already-used directions. Pure novelty (`mix=1.0`) preserves rank
+  but badly weakens BT (`depth6 0.5117/0.5318`). A small novelty mix works
+  better: depth-6 `mix=0.25`, batch `1024`, eta-total `32`, train/test BT
+  `0.4020/0.4270` versus old stochastic `0.4007/0.4219`, with rank `22.4`
+  versus `20.3` and all-PCA `0.1615` versus `0.1515`.
+
+- RESULT (2026-06-28): Full-data novelty-mix `0.25` is the current best
+  representation-quality repair that still stays in the gradient-of-BT-step
+  regime. With batch `1024`, `K=1`, eta-total `32`, depth 12 reached
+  train/test BT `0.3496/0.3623`, rank `19.1`, last/all-PCA/best readout
+  `0.1750/0.1896/0.1760`; the old stochastic depth-12 result was
+  `0.3486/0.3603`, rank `16.4`, all-PCA `0.1848`, best `0.1696`. At depth 24,
+  novelty-mix `0.25` reached `0.3328/0.3505`, rank `24.1`,
+  last/all-PCA/best `0.1776/0.1956/0.1808`; old stochastic was
+  `0.3237/0.3374`, rank `19.6`, `0.1716/0.1930/0.1738`. The fix does not
+  close the BP-BT objective gap, but it fixes the most concrete representation
+  failure found so far: valid BT-gradient steps were too concentrated in
+  already-represented modes. A K=2 ensemble with the same novelty mix improved
+  BT (`0.3062/0.3233`) but again lowered representation quality
+  (`rank 16.0`, last/all-PCA/best `0.1658/0.1922/0.1708`), so the current
+  research direction should prioritize novelty-preserving stochastic
+  single-batch steps over ensemble averaging.
+
+- DIAGNOSTIC (2026-06-28): Tested two more natural branch-dictionary fixes.
+  Concatenating a separately normalized novel branch dictionary
+  `[\Phi, gamma Phi_perp]` is too novelty-dominated: depth-6 scale `0.25`
+  reached high rank `38.1` but worse train/test BT `0.4404/0.4772` and
+  all-PCA `0.156`; scale `1.0` and `2.0` raised rank to `44-46` but BT fell
+  to about `0.49-0.53`. Adding a small random-feature component before the
+  nonlinearity also failed to reproduce the mixed-novelty benefit:
+  random-blend `0.1/0.25` gave depth-6 train/test BT `0.4012/0.4227` and
+  `0.4029/0.4256`, rank `20.5/20.9`, all-PCA `0.157/0.1595`. Interpretation:
+  broader nonlinear features or raw rank are not sufficient. The useful part
+  of the fix is specifically a mild residualization against the current
+  representation that does not dominate the BT step.
+
+- GENERALIZATION (2026-06-28): The linearly novel branch mix generalizes across
+  at least one CIFAR seed. At seed `8`, depth 12, batch `1024`, eta-total `32`,
+  old stochastic moment OLS reached train/test BT `0.3671/0.3787`, rank
+  `15.3`, last/all-PCA/best `0.1638/0.1788/0.1640`. The same setup with
+  `branch_novelty_mix=0.25` reached BT `0.3688/0.3808`, rank `17.4`,
+  last/all-PCA/best `0.1688/0.1832/0.1688`. This reproduces the seed-7
+  pattern: a tiny BT cost for better last-layer/all-layer representations.
+
+- DATASET CHECK (2026-06-28): On Tiny ImageNet with Barlow-style positives
+  (`tinyimagenet200_barlow`, `n_train=20000`, `n_test=5000`, input dim `512`,
+  depth 12), the same novelty mix only partially generalizes. Baseline
+  stochastic moment OLS: train/test BT `0.6087/0.6374`, rank `39.0`,
+  last/all-PCA/best `0.0600/0.0670/0.0600`. Novelty mix `0.25`:
+  `0.6174/0.6472`, rank `45.9`, last/all-PCA/best `0.0616/0.0656/0.0616`.
+  Interpretation: novelty mixing still adds breadth and a small last-layer
+  gain, but does not improve Tiny all-layer semantics and worsens the BT
+  objective. The current fix is therefore not a full dataset-general solution;
+  Tiny exposes the remaining gap between "more modes" and "useful semantic
+  modes."
+
+- BP CONTROL (2026-06-28): Trained the missing residual BP-BT baseline on the
+  same Tiny setting (`tinyimagenet200_barlow`, 20k/5k, input dim 512, depth
+  12, 100 epochs). Residual BP-BT strongly satisfies the hidden BT objective
+  but has worse downstream readout than CF: hidden BT/dim `0.1164`, corr diag
+  `0.767`, last/all-PCA/best readout `0.0416/0.0594/0.0582`. Thus Tiny is not
+  a simple "backprop learns semantic representations and CF does not" case.
+  It separates objective satisfaction from downstream semantic usefulness.
+
+- DIAGNOSTIC (2026-06-28): Added cross-correlation singular metrics to
+  `bt_hidden_metrics` and CF moment rows. The Tiny CF failure is not mainly a
+  coordinate/gauge issue: final CF has corr diag `0.229`,
+  nuclear-per-dim `0.237`, trace/nuclear `0.966`; residual BP-BT has corr
+  diag `0.767`, nuclear-per-dim `0.768`, trace/nuclear `0.998`. Since CF's
+  nuclear mass is low too, the missing piece is not just rotating or aligning
+  coordinates. CF is not building enough paired-view invariant signal.
+
+- NEGATIVE (2026-06-28): Tested diagonal-preconditioned BT targets and larger
+  residual trust regions on Tiny. Multiplying the diagonal gradient by `2` or
+  `4` only moved train/test BT from `0.6087/0.6374` to `0.6066/0.6348` and
+  `0.6050/0.6332`; corr diag increased only to `0.230/0.232`, with no readout
+  gain. Diagnostics show the desired target diagonal delta grows to `8-16`,
+  but the realized per-layer diagonal delta remains about `0.03-0.06`, so the
+  branch/trust geometry saturates. Raising `max_update_ratio` to `0.7` made
+  Tiny worse (`0.6148/0.6449`, and `0.6099/0.6395` with diag multiplier `4`).
+  This rules out simple diagonal reweighting or larger steps as the fix.
+
+- NEGATIVE (2026-06-28): Tested a `shared_cross` branch dictionary from the
+  eigensystem of the symmetric paired-view cross-covariance. This is the
+  natural "amplify shared signal" first attempt, but it failed on Tiny:
+  power `0` reached train/test BT `0.6795/0.6787`, corr diag `0.204/0.206`,
+  last/all-PCA `0.0474/0.0468`; power `1` was similar. It keeps the weak
+  initial paired-view signal rather than amplifying it. The branch update is
+  too small and self-covariance off-mass stays large. Current implication:
+  useful invariant-signal amplification cannot be obtained by simply choosing
+  current cross-covariance eigenvectors as the nonlinear branch basis.
+
+- DIAGNOSTIC (2026-06-28): Added optional sample-space BT-gradient OLS terms
+  to `cf_mlp_moment_ols_residual.py`. Instead of only fitting a desired
+  correlation-matrix velocity, this term fits the residual branch to the
+  activation-space BT gradient after the standardization tangent projection.
+  This is the first CF variant that clearly amplifies Tiny paired-view signal:
+  pure sample-gradient Tiny depth 12 reached train/test BT `0.5587/0.5868`,
+  corr diag `0.294/0.272`, nuclear-per-dim `0.300/0.291`, versus moment-only
+  `0.6087/0.6374`, corr diag `0.229/0.211`, nuclear `0.237/0.240`.
+  However, it is destructive: rank drops to `18.5`, self-covariance off-mass
+  jumps to `120.5`, and readout falls to `0.0472/0.0496`. A hybrid
+  moment+sample target improves train BT (`0.5513`) but generalizes poorly
+  (`test 0.6150`) and does not improve readout. On CIFAR seed 7, pure
+  sample-gradient depth 12 also worsens the representation: BT `0.4046/0.4163`,
+  rank `16.7`, last/all-PCA `0.1522/0.1650`, worse than stochastic moment OLS
+  and novelty mix.
+
+- NEGATIVE (2026-06-28): Tried adding self-covariance moment correction to
+  pure sample-gradient on Tiny. This overcorrects: self-cov weight `0.01`
+  raises rank to `125` and drops self-cov off-mass to `4.27`, but destroys
+  invariant signal (`BT 0.8463/0.8757`, corr diag `0.081/0.065`); weight `0.1`
+  is worse (`BT 0.9104/0.9433`). This mirrors the earlier self-cov negative:
+  summed covariance decorrelation is not the right nondestructive constraint.
+  Current implication: sample-space gradients can amplify invariant signal,
+  but need a lexicographic/trust-region covariance constraint rather than an
+  additive self-covariance target.
+
+- LOCALIZATION (2026-06-28): Tested whether the positive mid-depth realized
+  gain scan could be repaired by conservative scale schedules. Capping the
+  line-search scale after layer 3 at `0.25` improved held-out Tiny BT
+  (`0.6374 -> 0.6280`) but reduced rank/readout (`rank 39.0 -> 33.4`,
+  all-PCA `0.0670 -> 0.0592`). Capping after layer 6 behaved similarly
+  (`test BT 0.6329`, all-PCA `0.0612`). A rank-preserving line search was
+  also negative: strict rank preservation mostly stalled (`0.6516/0.6592`,
+  all-PCA `0.0542`), and a 2% rank-loss tolerance stayed below the baseline
+  (`0.6221/0.6432`, all-PCA `0.0630`). The failure point is therefore not
+  merely late-step scale. The local BT-improving direction is real, but scalar
+  selection either under-updates useful representation geometry or preserves
+  rank by giving up the invariant step.
+
+- NEGATIVE (2026-06-28): Added the same 2% rank-floor selector to the
+  moment+sample-gradient hybrid. It did not fix the hybrid's remaining
+  representation failure. Weight `4` moved from `0.5299/0.5843`, rank `31.4`,
+  all-PCA `0.0608` to `0.5559/0.5931`, rank `29.6`, all-PCA `0.0586`.
+  Weight `8` collapsed back toward a weak objective trajectory
+  (`0.6167/0.6277`) with very high self-covariance off-mass (`111.5`) and
+  all-PCA `0.0572`. This rules out a scalar rank floor as the missing
+  nondestructive projection for sample-space BT gradients.
+
+- SELECTOR (2026-06-28): Implemented `cf_mlp_realized_selector.py`, a greedy
+  trajectory-level realized-gain selector. Each layer still solves closed-form
+  projected BT-gradient OLS for a menu of residual branches, but the selector
+  chooses the candidate branch and scale by realized train BT, held-out BT, or
+  held-out cross-view nuclear mass. This is a minor pivot that stays inside
+  the "gradient of the objective step" regime and tests whether the current
+  update cone contains a useful BP-like path if directions are chosen better.
+
+- RESULT (2026-06-28): The realized selector gives an objective fix but not a
+  representation fix. On Tiny depth 12, train-BT selection reached
+  train/test BT `0.6055/0.6328`, rank `38.4`, all-PCA `0.0638`; held-out-BT
+  selection reached `0.6076/0.6279`, rank `37.3`, all-PCA `0.0610`; nuclear
+  selection reached the strongest invariant statistics (`0.6036/0.6121`,
+  test nuclear `0.2611`) but concentrated hardest (`rank 30.2`,
+  self-cov off `40.0`, all-PCA `0.0578`). Baseline stochastic moment OLS was
+  `0.6087/0.6374`, rank `39.0`, all-PCA `0.0670`. Exact failure point: the
+  current closed-form residual update cone contains directions that improve
+  BT/nuclear, but those directions mostly improve the objective by
+  concentrating already-available invariant modes, not by assembling useful
+  new representation modes. Better scale/candidate selection cannot repair
+  that cone; the next fix must change the projection/dictionary so the
+  objective-gradient component is explicitly coupled to nondestructive
+  mode creation.
+
+- DIAGNOSTIC (2026-06-28): Added `sample_target_projection=residual`, which
+  residualizes the sample-space BT-gradient target against the current hidden
+  representation before fitting it. This directly tests whether the raw
+  sample-gradient failure was just old-span squeezing. The new-mode component
+  is not tiny: at Tiny depth 6, about `57-58%` of the sample-gradient target
+  energy remains after residualizing (`projection R2 ~= 0.42`). But fitting
+  that component is not a representation fix. Weight `4`, no rescale reached
+  `0.5789/0.6332`, rank `35.6`, all-PCA `0.0596`; pairing with
+  `branch_novelty_mix=0.25` reached `0.5942/0.6515`, rank `41.9`, all-PCA
+  `0.0604`; concat residual branch features produced high rank but poor
+  invariance/readout (`concat0.25` `0.6231/0.6997`, rank `55.4`,
+  all-PCA `0.0566`). Interpretation: the new-mode gradient component exists,
+  but it is not by itself aligned with useful semantic/invariant mode assembly.
+
+- POSITIVE (2026-06-28): Added an old-span update penalty, a more natural
+  constrained moment-space formulation:
+  \[
+  \min_B \|L_\Phi(B)-T_{\mathrm{BT}}\|^2
+  + \mu\|\Pi_H\Phi B\|^2+\rho\|B\|^2.
+  \]
+  This penalizes the part of the residual update predictable from the current
+  representation *inside* the OLS solve, instead of selecting/rank-capping
+  after a direction has already collapsed. On Tiny depth 12 with the same
+  line-search scale menu as the baseline, `old_span_update_penalty=0.1`
+  improved train/test BT from `0.6087/0.6374` to `0.5881/0.6291`, increased
+  rank `39.0 -> 42.5`, lowered self-cov off-mass `22.7 -> 21.8`, and nudged
+  all-PCA `0.0670 -> 0.0676`. Penalty `0.05` improved BT more
+  (`0.5931/0.6256`) but hurt all-PCA (`0.0632`); penalty `0.2` improved BT
+  most (`0.5747/0.6209`) and last-layer readout (`0.0638`) but all-PCA was
+  `0.0666`. Thus the mechanism is real but narrow: too little penalty still
+  squeezes, too much protects/reshapes breadth at a representation cost.
+
+- GENERALIZATION (2026-06-28): The old-span penalty partially generalizes to
+  CIFAR100 SimCLR. At depth 12, seed 7, `old_span_update_penalty=0.1` changed
+  train/test BT from `0.3486/0.3603` to `0.3488/0.3651`, rank
+  `16.4 -> 22.9`, self-cov off `36.3 -> 28.8`, last-layer readout
+  `0.1672 -> 0.1780`, and all-PCA `0.1848 -> 0.1886`. This is a
+  representation-breadth/readout generalization but not an objective
+  generalization: unlike Tiny, CIFAR pays a small held-out BT cost. Current
+  interpretation: penalizing old-span motion is the first mechanism-level
+  repair with the right statistical shape, but the invariant-vs-mode-creation
+  tradeoff is still dataset-sensitive.
+
+- NORMALIZATION (2026-06-28): Added `old_span_update_normalization=operator`,
+  which makes the old-span penalty dimensionless by scaling it by the local
+  random-probe energy ratio between the BT moment operator and the old-span
+  update operator. This is the natural next formulation:
+  \[
+  \|L_\Phi(B)-T_{\mathrm{BT}}\|^2
+  +\mu\,\frac{\mathbb E\|L_\Phi(Z)\|^2}{\mathbb E\|\Pi_H\Phi Z\|^2}
+  \|\Pi_H\Phi B\|^2+\rho\|B\|^2.
+  \]
+  At depth 6, dimensionless `mu=1` produced effective fixed weights about
+  `0.020` on Tiny and `0.083` on CIFAR, explaining why fixed `0.1` was not a
+  comparable intervention across datasets. At depth 12, Tiny `mu=5` was the
+  best current old-span variant: train/test BT `0.5863/0.6273`, rank `41.6`,
+  self-cov off `22.1`, last/all-PCA `0.0626/0.0680` versus baseline
+  `0.6087/0.6374`, rank `39.0`, all-PCA `0.0670`. On CIFAR, `mu=1` was the
+  best compromise: `0.3460/0.3622`, rank `21.3`, all-PCA `0.1904`, versus
+  baseline `0.3486/0.3603`, rank `16.4`, all-PCA `0.1848`; `mu=5` pushed
+  all-PCA slightly higher (`0.1912`) but over-regularized BT (`0.3716`).
+  Conclusion: operator normalization improves the statistical framing and
+  cross-dataset readout behavior, but a single global `mu` is still not the
+  final mechanism. The remaining natural problem is choosing the invariant-vs-
+  old-span tradeoff from a layer statistic rather than from a global scalar.

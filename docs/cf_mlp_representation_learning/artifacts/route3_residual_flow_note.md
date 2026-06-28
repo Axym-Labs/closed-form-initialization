@@ -382,6 +382,94 @@ should be kept only as a diagnostic ablation: if even the nonlinear branch
 does not beat it on representation quality, the branch dictionary or
 linearization is wrong.
 
+## Correction From Moment-OLS Debugging
+
+The first implementation used a frozen-scale tangent. That was the wrong
+operator for BT, because BT is a correlation objective after per-view
+standardization, not an unnormalized covariance objective.
+
+For one view, write
+
+\[
+z = \frac{x-\mu}{\sigma}.
+\]
+
+For a residual perturbation \(\Delta x\), the first-order standardized
+perturbation is
+
+\[
+\Delta z
+=
+\Delta u
+-
+z\,\mathbb E[z\Delta u],
+\qquad
+\Delta u
+=
+\frac{\Delta x-\mathbb E[\Delta x]}{\sigma}.
+\]
+
+The missing term
+
+\[
+-z\,\mathbb E[z\Delta u]
+\]
+
+removes the component of the update that merely changes the view's own
+per-coordinate variance. Without this projection, the fitted moment step can
+have the correct sign in the unnormalized/frozen tangent but be nearly
+orthogonal to the actually realized BT-correlation movement.
+
+For branch features \(\Phi_1,\Phi_2\), update \(\Delta X_i=\Phi_iB\), and
+current standardized views \(Z_1,Z_2\), the corrected linearized operator is
+
+\[
+\mathcal A(B)
+=
+B_1^\top M_1
++ M_2B_2
+-
+\operatorname{diag}(B_1^\top N_1)C
+-
+C\operatorname{diag}(B_2^\top N_2),
+\]
+
+where \(B_i\) means the columns of \(B\) divided by the corresponding view
+standard deviations,
+
+\[
+M_1=\Phi_1^\top Z_2/n,\quad
+M_2=Z_1^\top\Phi_2/n,\quad
+N_1=\Phi_1^\top Z_1/n,\quad
+N_2=\Phi_2^\top Z_2/n,\quad
+C=Z_1^\top Z_2/n.
+\]
+
+This projected-standardization operator passed the finite-difference check:
+the infinitesimal realized correlation delta matches \(\mathcal A(B)\). The
+remaining limitation is therefore not the original tangent mismatch. It is
+that the gradient direction reachable through the current CF-shrink branch is
+still low-rank/compression-biased and much weaker than residual BP-BT.
+
+## Stochastic Moment Estimation
+
+The next useful correction was not a direct self-covariance penalty. Adding a
+self-correlation decorrelation target to the same normal equation raised rank
+only by suppressing BT descent.
+
+Minibatch moment estimation worked better. The layer still solves a closed-form
+projected moment-OLS problem, but \(C\), \(\nabla_C\mathcal L_{\rm BT}\), and
+the branch moments are estimated from a per-layer minibatch and then applied to
+the full representation. Empirically this improves BT and self-covariance rank
+together. This suggests a mechanism closer to stepwise spectral assembly:
+full-dataset moments repeatedly select dominant modes, whereas stochastic
+moments perturb the projected gradient enough to assemble a broader set of
+eigenmodes.
+
+This is a plausible closed-form analogue of one useful part of SGD. It should
+not be overclaimed as reproducing SGD's local-minima behavior; the mechanism
+we have direct evidence for is spectral/mode diversity.
+
 Acceptance should not be only downstream accuracy. The required diagnostics
 are:
 

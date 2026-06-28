@@ -158,6 +158,11 @@ def bt_hidden_metrics(view1, view2, lambd):
     weighted_off = float(lambd * off_diag)
     total = on_diag + weighted_off
     dim = int(corr.shape[0])
+    singular = np.linalg.svd(corr, compute_uv=False)
+    singular = np.maximum(singular.astype(np.float64), 0.0)
+    singular_sum = float(np.sum(singular))
+    singular_probs = singular / max(singular_sum, 1e-12)
+    singular_entropy = -float(np.sum(singular_probs * np.log(np.maximum(singular_probs, 1e-12))))
     return {
         "hidden_dim": dim,
         "bt_lambda": float(lambd),
@@ -172,6 +177,11 @@ def bt_hidden_metrics(view1, view2, lambd):
         "corr_diag_mean": float(np.mean(diag)),
         "corr_diag_min": float(np.min(diag)),
         "corr_diag_max": float(np.max(diag)),
+        "corr_singular_mean": float(np.mean(singular)),
+        "corr_singular_max": float(np.max(singular)),
+        "corr_nuclear_per_dim": singular_sum / dim,
+        "corr_singular_effective_rank": float(np.exp(singular_entropy)),
+        "corr_trace_to_nuclear": float(np.trace(corr) / max(singular_sum, 1e-12)),
         "offdiag_rms": float(np.sqrt(np.mean(off * off))),
     }
 
