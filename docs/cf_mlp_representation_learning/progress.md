@@ -1,5 +1,18 @@
 # Progress
 
+- ARTIFACT (2026-06-28 11:16 CEST): Generated old-style trajectory plots for
+  the strongest saved residual CF-BT results against residual BP-BT controls.
+  The BT trajectory plot shows all selected CF variants improve monotonically
+  but stay far above BP-BT, especially at depth 24. The mechanism plot makes
+  the current mismatch visually explicit at depth 12: BP-BT maintains high
+  identity/polar moment-law alignment and low diagonal update fraction, while
+  CF balanced identity decays across layers and CF identity+diag-metric becomes
+  late-layer anti-aligned despite improving BT. Artifacts:
+  `docs/cf_mlp_representation_learning/artifacts/strong_residual_bt_trajectory.png`,
+  `docs/cf_mlp_representation_learning/artifacts/strong_residual_moment_law_d12.png`,
+  plus PDF versions, summary CSV, report, and generator script
+  `plot_strong_residual_trajectories.py`.
+
 - EXPERIMENT/ANALYSIS (2026-06-28 11:05 CEST): Added direct moment-law
   diagnostics to `cf_mlp_moment_ols_residual.py`, so each CF layer now logs
   realized and linearized cosines against the same laws used for BP-BT:
