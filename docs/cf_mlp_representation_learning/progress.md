@@ -1,5 +1,44 @@
 # Progress
 
+- EXPERIMENT/ANALYSIS (2026-06-28 06:59 CEST): Tested the next natural
+  extension of adaptive old-span selection: replace the endpoint-heavy
+  `95%` train-BT rule with smoother or more invariant-aware local statistics.
+  I added CLI support for `--old-span-adaptive-rule {fraction,knee,density}`,
+  optional held-out selection via `--old-span-adaptive-eval-size`, and
+  `--old-span-adaptive-metric bt_plus_nuclear` so the path can be scored by
+  BT plus cross-view nuclear mass. The results are informative but reject
+  these as representation fixes. CIFAR100 depth 12 baseline/adaptive-fraction
+  were `0.3486/0.3603`, rank `16.4`, all-PCA `0.1848` and
+  `0.3418/0.3603`, rank `23.7`, all-PCA `0.1934`. The Pareto-knee selector
+  increased rank to `25.3` but worsened BT/readout (`0.3515/0.3675`,
+  all-PCA `0.1908`). Held-out path selection likewise raised rank but worsened
+  BT/readout (`0.3487/0.3665`, rank `26.2`, all-PCA `0.1912`). Nuclear-score
+  selection did close the invariant-signal gap better: CIFAR depth 12 reached
+  `0.3420/0.3579`, test nuclear `0.4610`, but all-PCA fell to `0.1902`.
+  Promoting nuclear-score to depth 24 confirmed the split: it improved
+  baseline and fraction on BT/nuclear (`0.3127/0.3289`, test corr diag
+  `0.4761`, test nuclear `0.480`) but lost representation quality
+  (`all-PCA 0.1910`, last `0.1706`) versus adaptive fraction
+  (`0.3173/0.3334`, all-PCA `0.1952`, last `0.1762`). Tiny depth 12 always
+  selected strong old-span suppression, independent of knee/held-out/nuclear,
+  and current-code reruns improved BT but not semantics (`0.5867/0.6252`,
+  all-PCA `0.0650` versus old artifact `0.5863/0.6273`, all-PCA `0.0680`).
+  A rank-preserving line-search repair for the nuclear selector failed:
+  CIFAR depth 12 fell to `0.4048/0.4129`, all-PCA `0.1734`, BT-improving
+  fraction `0.67`. Interpretation: the gap is no longer "rank" or
+  "held-out local BT" in isolation. Cross-view nuclear mass is a valid
+  mechanistic statistic for invariant signal, but optimizing it on the current
+  path reallocates modes away from class-useful structure. The current best
+  representation mechanism remains adaptive-fraction old-span selection; the
+  next real fix must change the branch/update space or add a more natural
+  mode-allocation/preservation principle than scalar rank. Artifacts:
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_cifar100_oldspan_knee_ls_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_cifar100_oldspan_adapt095_eval4096_ls_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_cifar100_oldspan_nuclear095_ls_d12_b1024/`,
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_cifar100_oldspan_nuclear095_ls_d24_b1024/`,
+  and
+  `docs/cf_mlp_representation_learning/artifacts_moment_ols_cifar100_oldspan_nuclear095_rankfloor_ls_d12_b1024/`.
+
 - EXPERIMENT/ANALYSIS (2026-06-28 06:37 CEST): Kept the moment-gradient OLS
   idea and localized the remaining failure of the old-span repair. The fixed
   penalty was not wrong in sign; it failed because a single global strength

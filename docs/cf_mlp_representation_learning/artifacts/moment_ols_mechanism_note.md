@@ -407,6 +407,26 @@ statistic. But it is the first projection-level fix that composes to depth 24
 on CIFAR and improves Tiny's invariant trajectory without the rank/readout
 collapse of raw sample-gradient steps.
 
+The obvious refinements do not close the representation gap. A Pareto-knee
+selector over BT gain versus old-span cost increases CIFAR rank but worsens
+BT/readout; held-out positive-pair selection behaves similarly. Scoring the
+path by BT plus cross-view nuclear mass is mechanistically real: CIFAR depth 24
+improves to `0.3127/0.3289` train/test BT and test nuclear near `0.480`,
+better than the adaptive-fraction run on invariant statistics. But all-PCA
+falls to `0.1910` versus `0.1952` for adaptive fraction, and the per-layer
+linear readout stops improving around mid-depth. A strict rank-preserving
+line-search repair collapses the useful BT trajectory (`0.4048/0.4129`, all-PCA
+`0.1734` at CIFAR depth 12). Thus rank and nuclear mass are diagnostics, not
+the missing objective by themselves.
+
+The nuanced compression picture is now sharper. Useful SSL should compress
+nuisance variation, and the BT objective is partly a compression/alignment
+objective. The failure is not "compression happened"; it is *misallocated
+compression*: the current CF path can assemble stronger invariant mass while
+discarding or failing to preserve modes that are class-useful under the linear
+probe. The next mechanism has to say which modes should survive or be refined,
+not merely how much rank, BT, or nuclear mass to keep.
+
 This suggests that SGD's advantage here may not be mystical multi-layer credit
 assignment. It may be partly a spectral exploration / mode-selection mechanism:
 minibatch gradients do not keep selecting exactly the same global leading
@@ -487,6 +507,13 @@ moment directions.
     improves BT, rank, and all-PCA relative to the stochastic baseline. Tiny
     improves BT/rank but not class semantics, so the remaining failure is
     invariant-signal-to-semantic-mode allocation, not simply old-span reuse.
+
+16. Local path-statistic refinements split invariant signal from useful
+    representation quality. Pareto-knee and held-out-BT path selection raise
+    rank but hurt readout. BT+nuclear path selection improves cross-view
+    invariant statistics but still hurts all-PCA. Rank-preserving line search
+    throttles the update and fails. The missing object is mode allocation, not
+    another scalar proxy for compression.
 
 ## Next Mechanism Candidates
 
@@ -586,6 +613,15 @@ moment directions.
     BT/cross-view nuclear statistic. The goal is not more tuning of \(\mu\),
     but a local criterion for "invariant gain per old-span displacement" that
     remains closed-form and layerwise.
+
+14. **Mode-allocation preserving branch/update rule.**
+    The path-statistic tests suggest the next fix should alter the realizable
+    update space, not only the selector. A natural target is a residual update
+    that increases cross-view invariant mass only in directions that preserve
+    recoverability of already useful modes, e.g. through a constrained
+    low-order operator that couples BT gain to a linear-retention or
+    mode-continuation condition. A scalar rank floor is too crude; the
+    preservation object must be mode-specific.
 
 Batch ensemble moment OLS should be deprioritized as a representation fix:
 the K=2/K=4 tests improved BT but reduced rank/readout.

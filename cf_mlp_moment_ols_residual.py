@@ -223,6 +223,27 @@ def bt_total_per_dim_torch(view1, view2, bt_lambda):
     return (on_diag + float(bt_lambda) * off_diag) / corr.shape[0]
 
 
+def bt_score_stats_torch(view1, view2, bt_lambda):
+    _, _, corr, _, _, _ = bt_corr_and_gradient(view1, view2, bt_lambda)
+    diag = torch.diagonal(corr)
+    on_diag = torch.sum((diag - 1.0) ** 2)
+    off_diag = torch.sum(corr * corr) - torch.sum(diag * diag)
+    bt = (on_diag + float(bt_lambda) * off_diag) / corr.shape[0]
+    nuclear = torch.sum(torch.linalg.svdvals(corr)) / corr.shape[0]
+    return {
+        "bt": float(bt.detach().cpu().item()),
+        "nuclear": float(nuclear.detach().cpu().item()),
+    }
+
+
+def old_span_adaptive_score(stats, args):
+    if args.old_span_adaptive_metric == "bt":
+        return float(stats["bt"])
+    if args.old_span_adaptive_metric == "bt_plus_nuclear":
+        return float(stats["bt"]) - float(args.old_span_adaptive_nuclear_weight) * float(stats["nuclear"])
+    raise ValueError(f"Unknown old-span adaptive metric: {args.old_span_adaptive_metric}")
+
+
 def self_corr_offdiag_per_dim_torch(x):
     z = standardize_torch(x)
     corr = (z.T @ z) / float(z.shape[0])
@@ -432,6 +453,14 @@ def line_search_eval_indices(args, layer_idx, seed, n, device):
     return torch.randperm(n, generator=gen, device=device)[: int(args.line_search_eval_size)]
 
 
+def old_span_adaptive_eval_indices(args, layer_idx, seed, n, device):
+    if int(args.old_span_adaptive_eval_size) <= 0 or int(args.old_span_adaptive_eval_size) >= n:
+        return None
+    gen = torch.Generator(device=device)
+    gen.manual_seed(int(seed) + 99991 * (int(layer_idx) + 1))
+    return torch.randperm(n, generator=gen, device=device)[: int(args.old_span_adaptive_eval_size)]
+
+
 def operator_context(args, phi1, phi2, z1, z2, corr):
     context = {
         "mode": args.standardization_jacobian,
@@ -518,6 +547,53 @@ def old_span_update_rms_from_terms(terms, b):
     if not vals:
         return float("nan")
     return float(torch.sqrt(torch.mean(torch.stack(vals))).detach().cpu().item())
+
+
+def select_old_span_candidate(candidates, before_score, args):
+    best_score = min(item["score"] for item in candidates)
+    best_gain = float(before_score) - best_score
+    for item in candidates:
+        item["gain"] = float(before_score) - float(item["score"])
+    if args.old_span_adaptive_rule == "fraction":
+        if best_gain > 0.0:
+            min_gain = float(args.old_span_adaptive_bt_fraction) * best_gain
+            eligible = [item for item in candidates if item["gain"] >= min_gain]
+        else:
+            eligible = candidates
+        if not eligible:
+            eligible = candidates
+        selected = min(eligible, key=lambda item: (item["old_rms"], item["score"]))
+        selected["selection_score"] = selected["gain"] / max(best_gain, 1e-12) if best_gain > 0.0 else 0.0
+        return selected, best_score, best_gain
+    if args.old_span_adaptive_rule == "density":
+        positive = [item for item in candidates if item["gain"] > 0.0]
+        if not positive:
+            selected = min(candidates, key=lambda item: (item["score"], item["old_rms"]))
+            selected["selection_score"] = 0.0
+            return selected, best_score, best_gain
+        for item in positive:
+            item["selection_score"] = item["gain"] / max(item["old_rms"] ** 2, 1e-12)
+        selected = max(positive, key=lambda item: (item["selection_score"], item["gain"], -item["old_rms"]))
+        return selected, best_score, best_gain
+    if args.old_span_adaptive_rule == "knee":
+        positive = [item for item in candidates if item["gain"] > 0.0]
+        if not positive:
+            selected = min(candidates, key=lambda item: (item["score"], item["old_rms"]))
+            selected["selection_score"] = 0.0
+            return selected, best_score, best_gain
+        min_cost = min(item["old_rms"] for item in positive)
+        max_cost = max(item["old_rms"] for item in positive)
+        min_gain = min(item["gain"] for item in positive)
+        max_gain = max(item["gain"] for item in positive)
+        cost_span = max(max_cost - min_cost, 1e-12)
+        gain_span = max(max_gain - min_gain, 1e-12)
+        for item in positive:
+            cost_norm = (item["old_rms"] - min_cost) / cost_span
+            gain_norm = (item["gain"] - min_gain) / gain_span if max_gain > min_gain else 1.0
+            item["selection_score"] = gain_norm - cost_norm
+        selected = max(positive, key=lambda item: (item["selection_score"], item["gain"], -item["old_rms"]))
+        return selected, best_score, best_gain
+    raise ValueError(f"Unknown old-span adaptive rule: {args.old_span_adaptive_rule}")
 
 
 def adjoint_term_operator(e, term):
@@ -950,14 +1026,29 @@ def run_variant(args, point, tensors, variant, device):
         )
         old_span_selected_penalty = float(args.old_span_update_penalty)
         old_span_adaptive_before_bt = float("nan")
+        old_span_adaptive_before_nuclear = float("nan")
         old_span_adaptive_best_bt = float("nan")
+        old_span_adaptive_best_gain = float("nan")
         old_span_adaptive_selected_bt = float("nan")
+        old_span_adaptive_selected_nuclear = float("nan")
+        old_span_adaptive_selected_gain = float("nan")
+        old_span_adaptive_selected_score = float("nan")
         old_span_adaptive_selected_old_rms = float("nan")
         old_span_adaptive_candidate_count = 0
         if args.old_span_adaptive_path and any(term.get("old_span_term", False) for term in terms):
-            old_span_adaptive_before_bt = float(
-                bt_total_per_dim_torch(view1_tr, view2_tr, args.bt_lambda).detach().cpu().item()
+            idx_old_eval = old_span_adaptive_eval_indices(
+                args, layer_idx, point.seed, view1_tr.shape[0], view1_tr.device
             )
+            if idx_old_eval is None:
+                old_eval_v1 = view1_tr
+                old_eval_v2 = view2_tr
+            else:
+                old_eval_v1 = view1_tr[idx_old_eval]
+                old_eval_v2 = view2_tr[idx_old_eval]
+            old_span_before_stats = bt_score_stats_torch(old_eval_v1, old_eval_v2, args.bt_lambda)
+            old_span_adaptive_before_bt = old_span_before_stats["bt"]
+            old_span_adaptive_before_nuclear = old_span_before_stats["nuclear"]
+            old_span_before_score = old_span_adaptive_score(old_span_before_stats, args)
             path_candidates = []
             for path_penalty in args.old_span_adaptive_path:
                 path_weights = configure_old_span_terms(terms, args, path_penalty)
@@ -983,35 +1074,32 @@ def run_variant(args, point, tensors, variant, device):
                     [base_tr + delta_base_path, view1_tr + delta_v1_path, view2_tr + delta_v2_path],
                     [],
                 )
-                cand_bt = float(
-                    bt_total_per_dim_torch(cand_train[1], cand_train[2], args.bt_lambda).detach().cpu().item()
-                )
+                if idx_old_eval is None:
+                    cand_eval = cand_train
+                else:
+                    cand_eval = [arr[idx_old_eval] for arr in cand_train]
+                cand_stats = bt_score_stats_torch(cand_eval[1], cand_eval[2], args.bt_lambda)
+                cand_score = old_span_adaptive_score(cand_stats, args)
                 old_rms = old_span_update_rms_from_terms(terms, b_path)
                 path_candidates.append(
                     {
                         "penalty": float(path_penalty),
-                        "bt": cand_bt,
+                        "bt": cand_stats["bt"],
+                        "nuclear": cand_stats["nuclear"],
+                        "score": cand_score,
                         "old_rms": old_rms,
                         "mean_effective_weight": float(np.mean(path_weights)) if path_weights else float("nan"),
                     }
                 )
             old_span_adaptive_candidate_count = len(path_candidates)
+            selected, best_score, best_gain = select_old_span_candidate(path_candidates, old_span_before_score, args)
             old_span_adaptive_best_bt = min(item["bt"] for item in path_candidates)
-            best_gain = old_span_adaptive_before_bt - old_span_adaptive_best_bt
-            if best_gain > 0.0:
-                min_gain = float(args.old_span_adaptive_bt_fraction) * best_gain
-                eligible = [
-                    item
-                    for item in path_candidates
-                    if old_span_adaptive_before_bt - item["bt"] >= min_gain
-                ]
-            else:
-                eligible = path_candidates
-            if not eligible:
-                eligible = path_candidates
-            selected = min(eligible, key=lambda item: (item["old_rms"], item["bt"]))
+            old_span_adaptive_best_gain = best_gain
             old_span_selected_penalty = selected["penalty"]
             old_span_adaptive_selected_bt = selected["bt"]
+            old_span_adaptive_selected_nuclear = selected["nuclear"]
+            old_span_adaptive_selected_gain = selected["gain"]
+            old_span_adaptive_selected_score = selected["selection_score"]
             old_span_adaptive_selected_old_rms = selected["old_rms"]
             old_span_effective_weights = configure_old_span_terms(terms, args, old_span_selected_penalty)
             old_span_effective_weight = (
@@ -1275,11 +1363,20 @@ def run_variant(args, point, tensors, variant, device):
             "old_span_update_weight_max": float(args.old_span_update_weight_max),
             "old_span_effective_weight": old_span_effective_weight,
             "old_span_adaptive_path": " ".join(str(value) for value in args.old_span_adaptive_path),
+            "old_span_adaptive_rule": args.old_span_adaptive_rule,
+            "old_span_adaptive_metric": args.old_span_adaptive_metric,
+            "old_span_adaptive_eval_size": int(args.old_span_adaptive_eval_size),
             "old_span_adaptive_bt_fraction": float(args.old_span_adaptive_bt_fraction),
+            "old_span_adaptive_nuclear_weight": float(args.old_span_adaptive_nuclear_weight),
             "old_span_selected_penalty": old_span_selected_penalty,
             "old_span_adaptive_before_bt": old_span_adaptive_before_bt,
+            "old_span_adaptive_before_nuclear": old_span_adaptive_before_nuclear,
             "old_span_adaptive_best_bt": old_span_adaptive_best_bt,
+            "old_span_adaptive_best_gain": old_span_adaptive_best_gain,
             "old_span_adaptive_selected_bt": old_span_adaptive_selected_bt,
+            "old_span_adaptive_selected_nuclear": old_span_adaptive_selected_nuclear,
+            "old_span_adaptive_selected_gain": old_span_adaptive_selected_gain,
+            "old_span_adaptive_selected_score": old_span_adaptive_selected_score,
             "old_span_adaptive_selected_old_rms": old_span_adaptive_selected_old_rms,
             "old_span_adaptive_candidate_count": old_span_adaptive_candidate_count,
             "old_span_feature_projection_energy_fraction": old_span_summary[
@@ -1511,6 +1608,15 @@ def summarize(mech_rows, readout_summaries):
                 "mean_old_span_adaptive_selected_old_rms": safe_nanmean(
                     [row["old_span_adaptive_selected_old_rms"] for row in rows]
                 ),
+                "mean_old_span_adaptive_best_gain": safe_nanmean(
+                    [row["old_span_adaptive_best_gain"] for row in rows]
+                ),
+                "mean_old_span_adaptive_selected_gain": safe_nanmean(
+                    [row["old_span_adaptive_selected_gain"] for row in rows]
+                ),
+                "mean_old_span_adaptive_selected_score": safe_nanmean(
+                    [row["old_span_adaptive_selected_score"] for row in rows]
+                ),
                 "final_effective_rank": final["after_effective_rank"],
                 "mean_linear_novelty": float(np.nanmean([row["prev_to_cur_linear_novelty"] for row in rows])),
                 "last_layer_accuracy": readout.get("last_layer_accuracy", float("nan")),
@@ -1660,7 +1766,11 @@ def main():
     parser.add_argument("--old-span-update-weight-min", type=float, default=0.0)
     parser.add_argument("--old-span-update-weight-max", type=float, default=0.0)
     parser.add_argument("--old-span-adaptive-path", type=float, nargs="+", default=[])
+    parser.add_argument("--old-span-adaptive-rule", choices=["fraction", "knee", "density"], default="fraction")
+    parser.add_argument("--old-span-adaptive-metric", choices=["bt", "bt_plus_nuclear"], default="bt")
+    parser.add_argument("--old-span-adaptive-eval-size", type=int, default=0)
     parser.add_argument("--old-span-adaptive-bt-fraction", type=float, default=0.95)
+    parser.add_argument("--old-span-adaptive-nuclear-weight", type=float, default=1.0)
     parser.add_argument("--diag-gradient-multiplier", type=float, default=1.0)
     parser.add_argument("--ols-ridge", type=float, default=1e-2)
     parser.add_argument("--cg-iters", type=int, default=40)
