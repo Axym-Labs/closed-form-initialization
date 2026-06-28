@@ -319,6 +319,7 @@ def ensure_solver_defaults(args):
         "line_search_rank_rel_tol": 0.0,
         "line_search_rank_abs_tol": 0.0,
         "line_search_min_bt_gain": 0.0,
+        "branch_include_current": False,
         "branch_random_blend": 0.0,
         "branch_shared_power": 0.0,
         "branch_post_transform": "none",
@@ -345,6 +346,10 @@ def ensure_solver_defaults(args):
         "branch_novelty_filter_max_delta": 0.0,
         "branch_novelty_filter_projection_ridge": 1e-5,
         "fd_scale": 1e-3,
+        "content_diagnostics": False,
+        "recon_reg": 100.0,
+        "max_retrieval": 2000,
+        "knn_k": 10,
         "pca_dim": 512,
         "scan_skip_readout": False,
     }

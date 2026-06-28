@@ -8,12 +8,20 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+from sklearn.decomposition import PCA
 
 from cf_mlp_barlow_clean import load_tensors
 from cf_mlp_bpbt_spectral_diagnostic import agreement_spectrum_metrics, transition_metrics
 from cf_mlp_bt_objective_by_layer import bt_hidden_metrics
 from cf_mlp_clean_readouts import linear_classifier_readout, pca512_readout
-from cf_mlp_layer_mechanistic import covariance_spectrum, standardize_many
+from cf_mlp_last_layer_content import (
+    class_knn_metrics,
+    class_one_hot,
+    linear_cka,
+    raw_reconstruction_metrics,
+    view_retrieval_metrics,
+)
+from cf_mlp_layer_mechanistic import covariance_spectrum, standardize_many, view_alignment
 from cf_mlp_residual_barlow import leaky_gelu
 from cf_mlp_residual_bt_variants import fit_cf_transform_with_prior_torch
 from cf_mlp_scalability import SweepPoint, write_jsonl
@@ -88,10 +96,24 @@ def polar_delta_target(corr, eta_layer, weight):
     return float(eta_layer) * float(weight) * (polar - corr)
 
 
+def identity_delta_target(corr, eta_layer, balance_diag=False):
+    eye = torch.eye(corr.shape[0], dtype=corr.dtype, device=corr.device)
+    target = eye - corr
+    if balance_diag:
+        diag = torch.arange(corr.shape[0], device=corr.device)
+        target = target.clone()
+        target[diag, diag] = target[diag, diag] * math.sqrt(max(1, corr.shape[0] - 1))
+    return float(eta_layer) * target
+
+
 def moment_delta_target(args, corr, bt_grad, eta_layer):
     bt_target = -float(eta_layer) * precondition_bt_gradient(bt_grad, args.diag_gradient_multiplier)
     if args.moment_target_kind == "bt":
         return bt_target
+    if args.moment_target_kind == "identity":
+        return identity_delta_target(corr, eta_layer)
+    if args.moment_target_kind == "balanced_identity":
+        return identity_delta_target(corr, eta_layer, balance_diag=True)
     polar_target = polar_delta_target(corr, eta_layer, args.polar_target_weight)
     if args.moment_target_kind == "polar":
         return polar_target
@@ -810,6 +832,15 @@ def build_branch_dictionary(args, current_train, current_test, branch_train, bra
     raise ValueError(f"Unknown branch novelty mode: {args.branch_novelty_mode}")
 
 
+def maybe_include_current_branch(args, current_train, current_test, branch_train, branch_test):
+    if not args.branch_include_current:
+        return branch_train, branch_test
+    train = [torch.cat([cur, phi], dim=1) for cur, phi in zip(current_train, branch_train)]
+    test = [torch.cat([cur, phi], dim=1) for cur, phi in zip(current_test, branch_test)]
+    train, test, _, _ = normalize_hidden_with_stats_torch(train, test)
+    return train, test
+
+
 def fit_indices(args, layer_idx, seed, n, device):
     if args.moment_batch_size <= 0 or args.moment_batch_size >= n:
         return None
@@ -1388,6 +1419,13 @@ def solve_layernorm_gain_floor_candidate(
         branch_train,
         branch_test,
     )
+    branch_train, branch_test = maybe_include_current_branch(
+        cand_args,
+        current_train,
+        current_test,
+        branch_train,
+        branch_test,
+    )
     base_tr, view1_tr, view2_tr = current_train
     base_te, view1_te, view2_te = current_test
     phi_base, phi_v1, phi_v2 = branch_train
@@ -1824,6 +1862,7 @@ def run_variant_adaptive_gain_floor(args, point, tensors, variant, device):
             "layernorm_kinetic_effective_weight": layernorm_kinetic_summary["layernorm_kinetic_effective_weight"],
             "branch_dim": int(args.branch_dim),
             "branch_feature_dim": int(phi_v1.shape[1]),
+            "branch_include_current": bool(args.branch_include_current),
             "branch_random_blend": float(args.branch_random_blend),
             "branch_shared_power": float(args.branch_shared_power),
             "branch_post_transform": branch_post_metrics["branch_post_transform"],
@@ -2138,6 +2177,13 @@ def run_variant(args, point, tensors, variant, device):
             branch_test,
         )
         branch_train, branch_test, branch_projection_metrics = build_branch_dictionary(
+            args,
+            [base_tr, view1_tr, view2_tr],
+            [base_te, view1_te, view2_te],
+            branch_train,
+            branch_test,
+        )
+        branch_train, branch_test = maybe_include_current_branch(
             args,
             [base_tr, view1_tr, view2_tr],
             [base_te, view1_te, view2_te],
@@ -2960,6 +3006,7 @@ def run_variant(args, point, tensors, variant, device):
             "layernorm_kinetic_effective_weight": layernorm_kinetic_summary["layernorm_kinetic_effective_weight"],
             "branch_dim": int(args.branch_dim),
             "branch_feature_dim": int(phi_v1.shape[1]),
+            "branch_include_current": bool(args.branch_include_current),
             "branch_random_blend": float(args.branch_random_blend),
             "branch_shared_power": float(args.branch_shared_power),
             "branch_post_transform": branch_post_metrics["branch_post_transform"],
@@ -3235,6 +3282,88 @@ def readout_rows(args, point, variant, state, ytr, yte):
     return layer_rows, [all_pca], summary
 
 
+def content_depth_indices(depth):
+    return sorted(set([0, max(0, depth // 2 - 1), depth - 1]))
+
+
+def content_rows(args, point, variant, state, tensors):
+    ytr = tensors["ytr_np"]
+    yte = tensors["yte_np"]
+    xtr = tensors["xtr_np"]
+    xte = tensors["xte_np"]
+    labels_onehot = class_one_hot(ytr, point.num_classes)
+    first = state["pathnorm_train"][0]
+    features = []
+    for idx in content_depth_indices(point.depth):
+        features.append(
+            (
+                f"layer_{idx + 1}_512",
+                state["pathnorm_train"][idx],
+                state["pathnorm_test"][idx],
+                state["pathnorm_view1_train"][idx],
+                state["pathnorm_view2_train"][idx],
+                1.0,
+            )
+        )
+
+    all_tr = np.concatenate(state["pathnorm_train"], axis=1)
+    all_te = np.concatenate(state["pathnorm_test"], axis=1)
+    all_v1 = np.concatenate(state["pathnorm_view1_train"], axis=1)
+    all_v2 = np.concatenate(state["pathnorm_view2_train"], axis=1)
+    pca = PCA(
+        n_components=min(args.pca_dim, all_tr.shape[1]),
+        svd_solver="randomized",
+        iterated_power=3,
+        random_state=point.seed + 1313,
+    )
+    all_tr_pca = pca.fit_transform(all_tr).astype(np.float32)
+    all_te_pca = pca.transform(all_te).astype(np.float32)
+    all_v1_pca = pca.transform(all_v1).astype(np.float32)
+    all_v2_pca = pca.transform(all_v2).astype(np.float32)
+    features.append(
+        (
+            "all_layers_pca512",
+            all_tr_pca,
+            all_te_pca,
+            all_v1_pca,
+            all_v2_pca,
+            float(np.sum(pca.explained_variance_ratio_)),
+        )
+    )
+
+    rows = []
+    for setup, ftr, fte, v1, v2, explained in features:
+        readout = linear_classifier_readout(ftr, fte, ytr, yte, args.probe_reg)
+        row = {
+            "variant": variant,
+            "seed": point.seed,
+            "dataset": point.dataset,
+            "depth": point.depth,
+            "width": point.width,
+            "setup": setup,
+            "representation": "moment_ols_residual",
+            "residual_normalization": args.residual_normalization,
+            "branch_post_transform": args.branch_post_transform,
+            "branch_post_gain_floor_adaptive_rule": args.branch_post_gain_floor_adaptive_rule,
+            "branch_post_gain_floor_adaptive_progress_fraction": float(
+                args.branch_post_gain_floor_adaptive_progress_fraction
+            ),
+            "class_linear_accuracy": readout["test_accuracy"],
+            "class_linear_train_accuracy": readout["train_accuracy"],
+            "pca_explained_variance": explained,
+        }
+        row.update(covariance_spectrum(ftr))
+        row.update(view_alignment(v1, v2, point.seed + 6262))
+        row.update(raw_reconstruction_metrics(ftr, fte, xtr, xte, args.recon_reg))
+        row.update(view_retrieval_metrics(v1, v2, args.max_retrieval))
+        row.update(class_knn_metrics(fte, yte, args.max_retrieval, args.knn_k))
+        row["cka_to_raw_input"] = linear_cka(ftr, xtr)
+        row["cka_to_labels"] = linear_cka(ftr, labels_onehot)
+        row["cka_to_first_layer"] = linear_cka(ftr, first)
+        rows.append(row)
+    return rows
+
+
 def write_csv(path, rows):
     keys = sorted({key for row in rows for key in row})
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -3467,6 +3596,31 @@ def write_report(path, summaries):
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_content_report(path, rows):
+    lines = [
+        "# Moment-OLS Representation Content",
+        "",
+        "Rows are frozen representations evaluated with one linear classifier and unsupervised content diagnostics.",
+        "",
+        "| Variant | Depth | Setup | Class acc | Raw recon R2 | CKA raw | CKA labels | CKA first | View top1 | kNN class | Rank | View ratio |",
+        "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for row in rows:
+        lines.append(
+            f"| {row['variant']} | {row['depth']} | {row['setup']} | "
+            f"{row['class_linear_accuracy']:.4f} | "
+            f"{row['raw_reconstruction_r2']:.3f} | "
+            f"{row['cka_to_raw_input']:.3f} | "
+            f"{row['cka_to_labels']:.3f} | "
+            f"{row['cka_to_first_layer']:.3f} | "
+            f"{row['view_retrieval_top1']:.3f} | "
+            f"{row['class_knn_purity']:.3f} | "
+            f"{row['effective_rank']:.1f} | "
+            f"{row['same_over_shuffled_mse']:.3f} |"
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def run(args):
     torch.set_num_threads(args.torch_threads)
     if args.device.startswith("cuda"):
@@ -3481,6 +3635,7 @@ def run(args):
     mech_rows = []
     layer_readouts = []
     setup_readouts = []
+    content_diagnostics = []
     readout_summaries = []
     for depth in args.depths:
         for seed in args.seeds:
@@ -3494,9 +3649,13 @@ def run(args):
                 layer_readouts.extend(lr)
                 setup_readouts.extend(sr)
                 readout_summaries.append(summary)
+                if args.content_diagnostics:
+                    content_diagnostics.extend(content_rows(args, point, variant, state, tensors))
                 write_jsonl(args.out_dir / "mech_rows.partial.jsonl", mech_rows)
                 write_jsonl(args.out_dir / "layer_readouts.partial.jsonl", layer_readouts)
                 write_jsonl(args.out_dir / "readout_summary.partial.jsonl", readout_summaries)
+                if args.content_diagnostics:
+                    write_jsonl(args.out_dir / "content_rows.partial.jsonl", content_diagnostics)
                 del state, lr, sr, summary
                 torch.cuda.empty_cache()
                 gc.collect()
@@ -3510,11 +3669,18 @@ def run(args):
     write_jsonl(args.out_dir / "setup_readouts.jsonl", setup_readouts)
     write_jsonl(args.out_dir / "readout_summary.jsonl", readout_summaries)
     write_jsonl(args.out_dir / "summary.jsonl", summaries)
+    if args.content_diagnostics:
+        write_jsonl(args.out_dir / "content_rows.jsonl", content_diagnostics)
     write_csv(args.out_dir / "mech_rows.csv", mech_rows)
     write_csv(args.out_dir / "layer_readouts.csv", layer_readouts)
     write_csv(args.out_dir / "summary.csv", summaries)
+    if args.content_diagnostics:
+        write_csv(args.out_dir / "content_rows.csv", content_diagnostics)
+        write_content_report(args.out_dir / "content_report.md", content_diagnostics)
     write_report(args.out_dir / "report.md", summaries)
     print((args.out_dir / "report.md").read_text(encoding="utf-8"), flush=True)
+    if args.content_diagnostics:
+        print((args.out_dir / "content_report.md").read_text(encoding="utf-8"), flush=True)
 
 
 def main():
@@ -3535,7 +3701,11 @@ def main():
     parser.add_argument("--num-classes", type=int, default=100)
     parser.add_argument("--bt-lambda", type=float, default=0.005)
     parser.add_argument("--eta-total", type=float, default=2.0)
-    parser.add_argument("--moment-target-kind", choices=["bt", "polar", "bt_plus_polar"], default="bt")
+    parser.add_argument(
+        "--moment-target-kind",
+        choices=["bt", "identity", "balanced_identity", "polar", "bt_plus_polar"],
+        default="bt",
+    )
     parser.add_argument("--moment-target-weight", type=float, default=1.0)
     parser.add_argument("--polar-target-weight", type=float, default=1.0)
     parser.add_argument("--sample-gradient-weight", type=float, default=0.0)
@@ -3600,6 +3770,7 @@ def main():
     parser.add_argument("--layernorm-kinetic-include-base", action="store_true")
     parser.add_argument("--max-postnorm-update-ratio", type=float, default=0.0)
     parser.add_argument("--branch-dim", type=int, default=128)
+    parser.add_argument("--branch-include-current", action="store_true")
     parser.add_argument("--branch-random-blend", type=float, default=0.0)
     parser.add_argument("--branch-shared-power", type=float, default=0.0)
     parser.add_argument("--branch-post-transform", choices=["none", "cf_shrink", "whiten", "grad_reach"], default="none")
@@ -3638,6 +3809,10 @@ def main():
     parser.add_argument("--cf-invariance", type=float, default=1.0)
     parser.add_argument("--max-update-ratio", type=float, default=0.35)
     parser.add_argument("--probe-reg", type=float, default=100.0)
+    parser.add_argument("--content-diagnostics", action="store_true")
+    parser.add_argument("--recon-reg", type=float, default=100.0)
+    parser.add_argument("--max-retrieval", type=int, default=2000)
+    parser.add_argument("--knn-k", type=int, default=10)
     parser.add_argument("--pca-dim", type=int, default=512)
     parser.add_argument("--max-spectrum-samples", type=int, default=50000)
     parser.add_argument("--max-transition-samples", type=int, default=12000)

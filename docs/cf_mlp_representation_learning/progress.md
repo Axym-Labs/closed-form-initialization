@@ -1,5 +1,37 @@
 # Progress
 
+- EXPERIMENT/ANALYSIS (2026-06-28 10:49 CEST): Switched from branch/gain
+  scanning to a BP-mechanism-derived target. I added
+  `cf_mlp_bp_moment_velocity.py`, which measures residual BP-BT's realized
+  layerwise cross-correlation velocity
+  \(\Delta C_l=C_{l+1}-C_l\). The diagnostic showed that both e2e and greedy
+  residual BP-BT are almost not aligned with the Euclidean BT-gradient target
+  (`mean cos ~0.03-0.04`) but are strongly aligned with whole-operator
+  identity/polar correction (`mean cos ~0.62-0.69`). Greedy residual BP-BT
+  has the same signature, strengthening the claim that the relevant BP bias is
+  incremental residual moment flow rather than multi-layer credit assignment
+  by itself. I then added two target-level changes to
+  `cf_mlp_moment_ols_residual.py`: `identity` and `balanced_identity`, plus an
+  opt-in current-plus-nonlinear branch dictionary
+  \(\Phi(H)=[H,\phi(HA)]\). The raw `identity` target failed for a precise
+  reason: Frobenius fitting was off-diagonal dominated and moved the diagonal
+  the wrong way, worsening BT even when target cosine was high. The
+  dimension-balanced target,
+  \(T_{ii}=\sqrt{d-1}(1-C_{ii}), T_{ij}=-C_{ij}\), fixed that failure. On
+  CIFAR100/SimCLR, width 512, K=4 moment batches, LayerNorm residual, kinetic
+  weight `1`, post-LN cap `0.25`, the balanced-identity CF variant had zero
+  train non-improving steps and zero test-BT increase steps at depths
+  6/12/24. Results: d6 `0.5435/0.5768` train/test BT, last/all-PCA
+  `0.1704/0.1776`; d12 `0.5037/0.5505`, `0.1840/0.1888`; d24
+  `0.4527/0.4934`, `0.1818/0.1946`. For d24, content moved away from raw
+  input and toward view/label structure across depth: CKA raw
+  `0.469 -> 0.345`, CKA labels `0.047 -> 0.059`, view top1
+  `0.089 -> 0.123`. This is not yet competitive with BP-BT or the best
+  previous CF readout, but it is a cleaner mechanism: BP-derived target,
+  residual from the start, monotone BP-like trajectory, and useful late-layer
+  features. Detailed note:
+  `docs/cf_mlp_representation_learning/artifacts/bp_moment_velocity_balanced_identity_note.md`.
+
 - EXPERIMENT/ANALYSIS (2026-06-28 11:38 CEST): Replaced the fixed branch
   gain-floor diagnostic with a per-layer adaptive LayerNorm residual rule that
   evaluates candidate floors using the same realized BT-quadratic guard as the
